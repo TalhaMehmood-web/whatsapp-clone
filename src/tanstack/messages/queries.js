@@ -8,6 +8,13 @@ import { PAGE_SIZE } from "@/config/constants";
 // Infinite query over messages. Each page is `{ messages: [], nextCursor }`.
 // Pages are ordered oldest→newest within each page; the *first* page returned
 // is the most recent page (i.e. message-list renders pages in reverse).
+//
+// Stale time is Infinity because every relevant server-side change
+// (message:new, edited, deleted, purged, reaction, pinned, read) is
+// pushed into the cache by use-chat-socket-sync. Switching tabs or
+// remounting the chat thread used to fire a fresh fetch every 30s;
+// after the Pusher migration that's pure waste — the cache is already
+// live. Older messages are loaded explicitly via fetchNextPage().
 export const useMessagesQuery = (chatId) =>
   useInfiniteQuery({
     queryKey: queryKeys.messages.list(chatId),
@@ -20,7 +27,9 @@ export const useMessagesQuery = (chatId) =>
     initialPageParam: null,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: !!chatId && !!useAuthStore.getState().accessToken,
-    staleTime: 1000 * 30,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
 export const useStarredMessagesQuery = () => {

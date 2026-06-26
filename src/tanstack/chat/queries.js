@@ -5,6 +5,32 @@ import { queryKeys } from "@/config/query-keys";
 import { useAuthStore } from "@/stores/auth-store";
 import { CHAT_TAB } from "@/config/constants";
 
+// Why `staleTime: Infinity` on the four chat-list queries below:
+//
+// Before realtime, these refetched every 30–60s to stay fresh. After
+// the Pusher migration, `use-chat-socket-sync` patches every cached
+// chats.list / chats.detail entry in response to the message:new,
+// message:read, group:added, group:removed, group:update events. The
+// cache is therefore the live source of truth for the whole session,
+// and refetching just bills bandwidth without producing new data.
+//
+// We also turn off `refetchOnWindowFocus` and `refetchOnMount` for the
+// same reason — both fire fresh GETs every time you switch tabs or
+// navigate back to a screen, which is exactly the symptom the user
+// reported ("each visit to a chat fires 5+ requests").
+//
+// The rare cases where the realtime stream can't reconstruct truth
+// from the event (cold cache on group-added, group-update header
+// changes) are already handled inside use-chat-socket-sync via an
+// explicit invalidateQueries call. Those are scoped to one chat and
+// only fire on real events, not on navigation.
+
+const LIVE_CHAT_QUERY_DEFAULTS = {
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  refetchOnMount: false,
+};
+
 // `filters` shape: { tab: CHAT_TAB.*, search? }
 export const useChatsQuery = (filters = { tab: CHAT_TAB.ALL }) => {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -15,7 +41,7 @@ export const useChatsQuery = (filters = { tab: CHAT_TAB.ALL }) => {
         .get(endpoints.chats.list, { params: filters })
         .then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 1000 * 30,
+    ...LIVE_CHAT_QUERY_DEFAULTS,
   });
 };
 
@@ -27,7 +53,7 @@ export const useChatQuery = (chatId) => {
     queryFn: () =>
       api.get(endpoints.chats.detail(chatId)).then((r) => r.data),
     enabled: !!chatId && !!accessToken,
-    staleTime: 1000 * 60,
+    ...LIVE_CHAT_QUERY_DEFAULTS,
   });
 };
 
@@ -40,7 +66,7 @@ export const useArchivedChatsQuery = () => {
     queryKey: queryKeys.chats.archived,
     queryFn: () => api.get(endpoints.chats.archived).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 1000 * 30,
+    ...LIVE_CHAT_QUERY_DEFAULTS,
   });
 };
 
@@ -54,7 +80,7 @@ export const useLockedChatsQuery = ({ enabled = true } = {}) => {
     queryKey: queryKeys.chats.locked,
     queryFn: () => api.get(endpoints.chats.locked).then((r) => r.data),
     enabled: !!accessToken && enabled,
-    staleTime: 1000 * 30,
+    ...LIVE_CHAT_QUERY_DEFAULTS,
   });
 };
 

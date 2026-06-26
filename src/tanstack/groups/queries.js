@@ -4,6 +4,12 @@ import { endpoints } from "@/config/endpoints";
 import { queryKeys } from "@/config/query-keys";
 import { useAuthStore } from "@/stores/auth-store";
 
+// Stale time is Infinity because:
+//   - User-initiated changes (add/remove/role change) invalidate this
+//     key directly in groups/mutations.js.
+//   - Peer-initiated changes fire GROUP_UPDATE over Pusher, which the
+//     chat sync hook invalidates here too.
+// So the cache is always live without remounting GETs on every navigate.
 export const useGroupMembersQuery = (chatId) => {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
@@ -11,6 +17,8 @@ export const useGroupMembersQuery = (chatId) => {
     queryFn: () =>
       api.get(endpoints.chats.members(chatId)).then((r) => r.data),
     enabled: !!chatId && !!accessToken,
-    staleTime: 1000 * 60,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 };

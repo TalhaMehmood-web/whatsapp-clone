@@ -66,11 +66,13 @@ function restore(qc, snapshots) {
   snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
 }
 
-function invalidateAll(qc) {
-  qc.invalidateQueries({ queryKey: queryKeys.chats.all });
-}
-
 // Generic factory: same pattern, different endpoint + patch.
+//
+// No invalidate-on-settle. The optimistic patch already represents the
+// post-write state (e.g. isPinned flipped) in every cached list — that's
+// the canonical truth. Invalidating after success would refire all chat
+// list queries on every pin/favourite/archive toggle, which is the
+// thrash we're trying to kill.
 function useToggleMutation({ endpoint, getPatch }) {
   const qc = useQueryClient();
   return useMutation({
@@ -87,7 +89,6 @@ function useToggleMutation({ endpoint, getPatch }) {
       return { snapshots: patchAllChatLists(qc, chatId, getPatch(value)) };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
   });
 }
 
@@ -111,6 +112,12 @@ export const useArchiveChatMutation = () =>
 
 // Marks every undelivered/unread message in the chat as READ for the current
 // user. Optimistically zeroes the unread badge in every cached chat list.
+//
+// No invalidate-on-settle: the optimistic patch already sets the unread
+// count to 0 in every cached list, and that IS the canonical post-read
+// state. Invalidating would refire the three chat-list queries
+// (chats?tab=all, archived, locked) on every chat visit — exactly the
+// thrash we're trying to eliminate.
 export const useMarkChatReadMutation = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -121,7 +128,6 @@ export const useMarkChatReadMutation = () => {
       return { snapshots: patchAllChatLists(qc, chatId, { unreadCount: 0 }) };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
   });
 };
 
@@ -139,7 +145,7 @@ export const useMarkChatUnreadMutation = () => {
       };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
+    // Optimistic patch IS the canonical state; no invalidate.
   });
 };
 
@@ -211,7 +217,8 @@ export const useDeleteChatMutation = () => {
       return { snapshots };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
+    // Clear-chat optimistically removed every row + dropped the per-chat
+    // caches; nothing else for the server to teach us.
   });
 };
 
@@ -238,7 +245,7 @@ export const useLockChatMutation = () => {
       };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
+    // Optimistic isLocked flip is canonical; no invalidate.
   });
 };
 
@@ -291,8 +298,7 @@ export const useSetDisappearingMutation = (chatId) => {
     },
     onError: (_e, _v, ctx) =>
       ctx && qc.setQueryData(queryKeys.chats.detail(chatId), ctx.prev),
-    onSettled: () =>
-      qc.invalidateQueries({ queryKey: queryKeys.chats.detail(chatId) }),
+    // Optimistic disappearingSeconds patch is canonical; no invalidate.
   });
 };
 
@@ -319,6 +325,6 @@ export const useMuteChatMutation = () => {
       };
     },
     onError: (_e, _v, ctx) => ctx && restore(qc, ctx.snapshots),
-    onSettled: () => invalidateAll(qc),
+    // Optimistic mutedUntil patch is canonical; no invalidate.
   });
 };

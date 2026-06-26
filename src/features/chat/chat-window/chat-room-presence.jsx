@@ -17,14 +17,27 @@ export function ChatRoomPresence({ chatId }) {
   const socket = useSocketStore((s) => s.socket);
   const { mutate: markRead } = useMarkChatReadMutation();
 
+  // Split the lifecycle so changing `socket` (null → bus on first ready
+  // tick, or reconnect cycle) doesn't re-fire markRead. Without this,
+  // every chat visit posted /read twice — once on initial render with a
+  // null socket, once when the bus instance landed.
+
+  // Mark-read fires once per chat the user opens. Reruns only when the
+  // chatId itself changes.
   useEffect(() => {
-    if (!chatId) return undefined;
-    if (socket) socket.joinChat(chatId);
+    if (!chatId) return;
     markRead(chatId);
+  }, [chatId, markRead]);
+
+  // Channel join/leave tracks the socket too because subscribe is only
+  // valid against a live bus.
+  useEffect(() => {
+    if (!chatId || !socket) return undefined;
+    socket.joinChat(chatId);
     return () => {
-      if (socket) socket.leaveChat(chatId);
+      socket.leaveChat(chatId);
     };
-  }, [chatId, socket, markRead]);
+  }, [chatId, socket]);
 
   return null;
 }
