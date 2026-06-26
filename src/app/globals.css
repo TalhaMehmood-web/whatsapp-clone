@@ -1,26 +1,183 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  WhatsApp Web theme — light + dark, layered on top of shadcn semantics.    */
+/*  `next-themes` toggles class="dark" on <html>; both branches define both   */
+/*  shadcn tokens (background/foreground/primary/…) and our wa-* brand tokens.*/
+/* ────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.5rem;
+
+  /* shadcn semantic tokens — light theme (WhatsApp Web light) */
+  --background: #efeae2;
+  --foreground: #111b21;
+  --card: #ffffff;
+  --card-foreground: #111b21;
+  --popover: #ffffff;
+  --popover-foreground: #111b21;
+  --primary: #008069;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f2f5;
+  --secondary-foreground: #111b21;
+  --muted: #f0f2f5;
+  --muted-foreground: #667781;
+  --accent: #f0f2f5;
+  --accent-foreground: #111b21;
+  --destructive: #ea0038;
+  --destructive-foreground: #ffffff;
+  --border: #e9edef;
+  --input: #e9edef;
+  --ring: #008069;
+
+  /* WhatsApp brand palette — light */
+  --wa-bg: #efeae2;
+  --wa-panel: #ffffff;
+  --wa-panel-2: #f0f2f5;
+  --wa-panel-3: #f5f6f6;
+  --wa-border: #e9edef;
+  --wa-text: #111b21;
+  --wa-text-muted: #667781;
+  --wa-green: #008069;
+  --wa-green-2: #d9fdd3;
+  --wa-green-soft: #d9fdd3;
+  --wa-read-blue: #53bdeb;
+  --wa-danger: #ea0038;
 }
 
+.dark {
+  --background: #0b141a;
+  --foreground: #e9edef;
+  --card: #111b21;
+  --card-foreground: #e9edef;
+  --popover: #233138;
+  --popover-foreground: #e9edef;
+  --primary: #00a884;
+  --primary-foreground: #ffffff;
+  --secondary: #202c33;
+  --secondary-foreground: #e9edef;
+  --muted: #202c33;
+  --muted-foreground: #8696a0;
+  --accent: #2a3942;
+  --accent-foreground: #e9edef;
+  --destructive: #f15c6d;
+  --destructive-foreground: #ffffff;
+  --border: #222d34;
+  --input: #2a3942;
+  --ring: #00a884;
+
+  --wa-bg: #0b141a;
+  --wa-panel: #111b21;
+  --wa-panel-2: #202c33;
+  --wa-panel-3: #2a3942;
+  --wa-border: #222d34;
+  --wa-text: #e9edef;
+  --wa-text-muted: #8696a0;
+  --wa-green: #00a884;
+  --wa-green-2: #005c4b;
+  --wa-green-soft: #103529;
+  --wa-read-blue: #53bdeb;
+  --wa-danger: #f15c6d;
+}
+
+/* Expose every CSS variable to Tailwind v4's utility generator. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-wa-bg: var(--wa-bg);
+  --color-wa-panel: var(--wa-panel);
+  --color-wa-panel-2: var(--wa-panel-2);
+  --color-wa-panel-3: var(--wa-panel-3);
+  --color-wa-border: var(--wa-border);
+  --color-wa-text: var(--wa-text);
+  --color-wa-text-muted: var(--wa-text-muted);
+  --color-wa-green: var(--wa-green);
+  --color-wa-green-2: var(--wa-green-2);
+  --color-wa-green-soft: var(--wa-green-soft);
+  --color-wa-read-blue: var(--wa-read-blue);
+  --color-wa-danger: var(--wa-danger);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-poppins), "Segoe UI", "Helvetica Neue", system-ui,
+    -apple-system, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    height: 100%;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Doodle wallpaper for the chat (message) pane. The doodle is rendered as
+   a CSS mask so the colour comes from the theme — dark mode darkens it
+   against the deep teal, light mode lightens it against the cream bg. */
+.wa-doodle {
+  background-color: var(--wa-bg);
+  position: relative;
+}
+.wa-doodle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: var(--wa-text-muted);
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='black' stroke-width='1'><circle cx='30' cy='30' r='10'/><path d='M60 50 q15 -20 30 0 t30 0'/><rect x='110' y='110' width='18' height='18' rx='3' transform='rotate(15 119 119)'/><path d='M20 120 l15 15 l-5 -20 z'/><circle cx='150' cy='40' r='4'/><path d='M70 150 q10 10 25 0'/></g></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><g fill='none' stroke='black' stroke-width='1'><circle cx='30' cy='30' r='10'/><path d='M60 50 q15 -20 30 0 t30 0'/><rect x='110' y='110' width='18' height='18' rx='3' transform='rotate(15 119 119)'/><path d='M20 120 l15 15 l-5 -20 z'/><circle cx='150' cy='40' r='4'/><path d='M70 150 q10 10 25 0'/></g></svg>");
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  opacity: 0.18;
+}
+.wa-doodle > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Custom thin scrollbars (WhatsApp Web style) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(134, 150, 160, 0.35);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(134, 150, 160, 0.6);
 }

@@ -1,0 +1,532 @@
+// WhatsApp Web Clone — Prisma schema
+// See CLAUDE.md "Prisma schema" + "UI / UX specification" for the source of truth.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users + per-user preferences
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id               String   @id @default(cuid())
+  handle           String?  @unique
+  phone            String?  @unique
+  email            String?  @unique
+  passwordHash     String
+  name             String
+  avatar           String?
+  about            String?  @default("Hey there! I am using WhatsApp.")
+  lastSeen         DateTime?
+  isOnline         Boolean  @default(false)
+  pushSubscription Json?
+  // bcrypt hash of the secret-code used to unlock locked chats.
+  lockedChatsSecret String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  chats                ChatMember[]
+  messages             Message[]
+  statuses             Status[]
+  statusViews          StatusView[]
+  reactions            Reaction[]
+  receipts             MessageReceipt[]
+  starredMsgs          StarredMessage[]
+  hiddenMessages       MessageHidden[]
+  blockedBy            Block[]              @relation("BlockedUser")
+  blocking             Block[]              @relation("BlockingUser")
+  calls                CallParticipant[]
+  privacy              PrivacySettings?
+  chatPrefs            ChatPreferences?
+  labels               Label[]
+  communityMemberships CommunityMember[]
+  channelSubs          ChannelSubscriber[]
+  friendRequestsSent     FriendRequest[]    @relation("FriendRequestSender")
+  friendRequestsReceived FriendRequest[]    @relation("FriendRequestReceiver")
+  notifications          Notification[]
+}
+
+model PrivacySettings {
+  id                   String          @id @default(cuid())
+  userId               String          @unique
+  lastSeen             VisibilityScope @default(CONTACTS)
+  profilePhoto         VisibilityScope @default(NOBODY)
+  about                VisibilityScope @default(CONTACTS)
+  status               VisibilityScope @default(CONTACTS)
+  readReceipts         Boolean         @default(true)
+  groupsPolicy         VisibilityScope @default(EVERYONE)
+  defaultDisappearing  Int?
+  blockUnknownMessages Boolean         @default(false)
+  linkPreviews         Boolean         @default(true)
+  appLockEnabled       Boolean         @default(false)
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChatPreferences {
+  id                   String       @id @default(cuid())
+  userId               String       @unique
+  theme                Theme        @default(SYSTEM)
+  wallpaperUrl         String?
+  mediaUploadQuality   MediaQuality @default(STANDARD)
+  autoDownloadPhotos   Boolean      @default(true)
+  autoDownloadVideos   Boolean      @default(false)
+  autoDownloadDocs     Boolean      @default(false)
+  spellCheck           Boolean      @default(true)
+  replaceTextWithEmoji Boolean      @default(true)
+  enterIsSend          Boolean      @default(true)
+  showPreviews         Boolean      @default(true)
+  outgoingSounds       Boolean      @default(false)
+  backgroundSync       Boolean      @default(true)
+  user                 User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chats, members, labels
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Chat {
+  id                  String   @id @default(cuid())
+  isGroup             Boolean  @default(false)
+  name                String?
+  photo               String?
+  description         String?
+  communityId         String?
+  // Disappearing messages TTL in seconds. Null = off. Applied to outgoing
+  // messages by stamping Message.expiresAt = now() + this many seconds.
+  disappearingSeconds Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  community Community?      @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  members   ChatMember[]
+  messages  Message[]
+  pins      PinnedMessage[]
+}
+
+// Each row is one pinned message in a chat. Matches WhatsApp Web's
+// behavior: multiple messages can be pinned simultaneously and the
+// banner cycles through them. We cap the count in lib code, not here.
+model PinnedMessage {
+  id        String   @id @default(cuid())
+  chatId    String
+  messageId String
+  pinnedBy  String
+  pinnedAt  DateTime @default(now())
+
+  chat    Chat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, messageId])
+  @@index([chatId, pinnedAt])
+}
+
+model ChatMember {
+  id          String     @id @default(cuid())
+  chatId      String
+  userId      String
+  role        MemberRole @default(MEMBER)
+  joinedAt    DateTime   @default(now())
+  isPinned    Boolean    @default(false)
+  isFavourite Boolean    @default(false)
+  isArchived  Boolean    @default(false)
+  isLocked    Boolean    @default(false)
+  mutedUntil  DateTime?
+  unreadCount Int        @default(0)
+  lastReadAt  DateTime?
+  // "Clear chat" timestamp: getMessages filters out anything with
+  // createdAt <= clearedAt for this user. Null means nothing cleared.
+  clearedAt   DateTime?
+
+  chat   Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  labels ChatMemberLabel[]
+
+  @@unique([chatId, userId])
+  @@index([userId, isArchived, isPinned])
+}
+
+// One row per (message, user) that the user has "deleted for me".
+// The message itself stays; we just filter it out for that one viewer.
+model MessageHidden {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId])
+}
+
+model Label {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  color     String   @default("#25D366")
+  createdAt DateTime @default(now())
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  members ChatMemberLabel[]
+
+  @@unique([userId, name])
+}
+
+model ChatMemberLabel {
+  chatMemberId String
+  labelId      String
+  chatMember   ChatMember @relation(fields: [chatMemberId], references: [id], onDelete: Cascade)
+  label        Label      @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([chatMemberId, labelId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Messages, receipts, reactions, stars
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Message {
+  id             String      @id @default(cuid())
+  chatId         String
+  senderId       String
+  content        String?
+  type           MessageType @default(TEXT)
+  mediaUrl       String?
+  mediaMime      String?
+  mediaThumbUrl  String?
+  mediaSizeBytes Int?
+  mediaDuration  Int?
+  // Cloudinary identifiers so we can delete the asset from the CDN when
+  // the message is removed for everyone.
+  mediaPublicId  String?
+  mediaResource  String?
+  fileName       String?
+  caption        String?
+  replyToId      String?
+  forwardedFrom  String?
+  forwardCount   Int         @default(0)
+  expiresAt      DateTime?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  chat      Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User             @relation(fields: [senderId], references: [id])
+  replyTo   Message?         @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[]        @relation("MessageReply")
+  reactions Reaction[]
+  receipts  MessageReceipt[]
+  starredBy StarredMessage[]
+  pins      PinnedMessage[]
+  hiddenFor MessageHidden[]
+
+  @@index([chatId, createdAt])
+}
+
+model MessageReceipt {
+  id          String        @id @default(cuid())
+  messageId   String
+  userId      String
+  status      ReceiptStatus @default(SENT)
+  deliveredAt DateTime?
+  seenAt      DateTime?
+  message     Message       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+model StarredMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  messageId String
+  starredAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status / Stories
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Status {
+  id            String     @id @default(cuid())
+  userId        String
+  content       String?
+  bgColor       String?
+  font          String?
+  mediaUrl      String?
+  mediaMime     String?
+  mediaDuration Int?
+  caption       String?
+  type          StatusType @default(TEXT)
+  expiresAt     DateTime
+  createdAt     DateTime   @default(now())
+
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  views StatusView[]
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+model StatusView {
+  id       String   @id @default(cuid())
+  statusId String
+  userId   String
+  viewedAt DateTime @default(now())
+  status   Status   @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([statusId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Communities + Channels
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Community {
+  id          String   @id @default(cuid())
+  name        String
+  photo       String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  chats   Chat[]
+  members CommunityMember[]
+}
+
+model CommunityMember {
+  id          String     @id @default(cuid())
+  communityId String
+  userId      String
+  role        MemberRole @default(MEMBER)
+  joinedAt    DateTime   @default(now())
+  community   Community  @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+}
+
+model Channel {
+  id          String   @id @default(cuid())
+  name        String
+  handle      String   @unique
+  photo       String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  subscribers ChannelSubscriber[]
+}
+
+model ChannelSubscriber {
+  id         String    @id @default(cuid())
+  channelId  String
+  userId     String
+  mutedUntil DateTime?
+  joinedAt   DateTime  @default(now())
+  channel    Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blocks + Calls
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  blocker   User     @relation("BlockingUser", fields: [blockerId], references: [id])
+  blocked   User     @relation("BlockedUser", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+// User-submitted report against a specific message. Multiple users can
+// report the same message (one row each). The moderation queue is out of
+// scope for the clone — we just persist the row + a reason.
+model MessageReport {
+  id          String   @id @default(cuid())
+  messageId   String
+  reporterId  String
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@unique([messageId, reporterId])
+  @@index([messageId])
+}
+
+model Call {
+  id        String     @id @default(cuid())
+  callerId  String?
+  type      CallType   @default(VOICE)
+  status    CallStatus @default(MISSED)
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime   @default(now())
+
+  participants CallParticipant[]
+
+  @@index([callerId, createdAt])
+}
+
+model CallParticipant {
+  id     String @id @default(cuid())
+  callId String
+  userId String
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Friend requests — gating layer in front of 1:1 chats
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FriendRequest {
+  id          String              @id @default(cuid())
+  fromId      String
+  toId        String
+  status      FriendRequestStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  respondedAt DateTime?
+
+  from User @relation("FriendRequestSender", fields: [fromId], references: [id], onDelete: Cascade)
+  to   User @relation("FriendRequestReceiver", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@index([toId, status])
+  @@index([fromId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications — durable inbox for things the toast might disappear before
+// the user sees them (friend requests, group invites, missed calls, …).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  kind      NotificationKind
+  title     String
+  body      String?
+  // Free-form payload — typically { friendRequestId, peerId, peerHandle, … }
+  // so the UI can deep-link without another fetch.
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum NotificationKind {
+  FRIEND_REQUEST
+  FRIEND_REQUEST_ACCEPTED
+  GROUP_ADDED
+  GROUP_REMOVED
+  MISSED_CALL
+  SYSTEM
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  VOICE_NOTE
+  STICKER
+  CONTACT
+  POLL
+  SYSTEM
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ReceiptStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum StatusType {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
+enum CallType {
+  VOICE
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ANSWERED
+  ONGOING
+  DECLINED
+  ENDED
+  MISSED
+}
+
+enum VisibilityScope {
+  EVERYONE
+  CONTACTS
+  CONTACTS_EXCEPT
+  NOBODY
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum MediaQuality {
+  STANDARD
+  HD
+}
