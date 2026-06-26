@@ -313,6 +313,11 @@ model Status {
   mediaMime     String?
   mediaDuration Int?
   caption       String?
+  // Cloudinary identifiers — stored so the manual delete + the 24h
+  // expiry cron can destroy the asset on the CDN. Null for TEXT
+  // statuses (no media to clean up).
+  mediaPublicId String?
+  mediaResource String?
   type          StatusType @default(TEXT)
   expiresAt     DateTime
   createdAt     DateTime   @default(now())

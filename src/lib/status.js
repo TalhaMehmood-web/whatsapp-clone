@@ -1,5 +1,6 @@
 import { prisma } from "./prisma.js";
 import { listFriends } from "./friend-requests.js";
+import { destroyMedia } from "./upload.js";
 import { StatusType } from "@/models/enums";
 
 const STATUS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -92,6 +93,11 @@ export async function createStatus({
   mediaMime,
   mediaDuration,
   caption,
+  // Cloudinary identifiers come from the upload helper — we persist them
+  // so the manual delete + the 24h expiry cron can call destroyMedia on
+  // the CDN. TEXT statuses pass null/undefined here and skip the destroy.
+  mediaPublicId,
+  mediaResource,
 }) {
   if (type === StatusType.TEXT && !content?.trim()) {
     const err = new Error("Status text is required");
@@ -114,6 +120,8 @@ export async function createStatus({
       mediaMime: mediaMime ?? null,
       mediaDuration: mediaDuration ?? null,
       caption: caption ?? null,
+      mediaPublicId: mediaPublicId ?? null,
+      mediaResource: mediaResource ?? null,
       expiresAt: new Date(Date.now() + STATUS_TTL_MS),
     },
   });
@@ -171,4 +179,50 @@ export async function deleteStatus({ userId, statusId }) {
     throw err;
   }
   await prisma.status.delete({ where: { id: statusId } });
+  // Fire-and-forget the CDN cleanup. We don't await it because a
+  // Cloudinary outage shouldn't block the user's "deleted" toast — and
+  // `destroyMedia` swallows errors internally anyway.
+  if (s.mediaPublicId) {
+    destroyMedia({
+      publicId: s.mediaPublicId,
+      resourceType: s.mediaResource ?? "image",
+    });
+  }
+}
+
+// Hard-deletes every Status row whose expiresAt is in the past AND
+// destroys the associated Cloudinary asset. Invoked by the hourly cron
+// at /api/cron/status-expire so 24h-old photo/video statuses don't
+// linger on the CDN burning storage quota.
+//
+// We process in small batches so a long backlog (e.g. after a cron
+// outage) can be drained across multiple invocations without blowing
+// the route timeout. `batchSize` defaults to 100.
+export async function pruneExpiredStatuses({ now = new Date(), batchSize = 100 } = {}) {
+  const expired = await prisma.status.findMany({
+    where: { expiresAt: { lt: now } },
+    select: { id: true, mediaPublicId: true, mediaResource: true },
+    take: batchSize,
+  });
+  if (expired.length === 0) return { deleted: 0, destroyed: 0 };
+
+  await prisma.status.deleteMany({
+    where: { id: { in: expired.map((s) => s.id) } },
+  });
+
+  // Fire CDN destroys in parallel — `destroyMedia` is best-effort and
+  // swallows errors, so one bad asset doesn't abort the whole batch.
+  let destroyed = 0;
+  await Promise.all(
+    expired.map(async (s) => {
+      if (!s.mediaPublicId) return;
+      destroyed += 1;
+      await destroyMedia({
+        publicId: s.mediaPublicId,
+        resourceType: s.mediaResource ?? "image",
+      });
+    }),
+  );
+
+  return { deleted: expired.length, destroyed };
 }

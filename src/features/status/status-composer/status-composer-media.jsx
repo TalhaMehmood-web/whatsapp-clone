@@ -71,6 +71,10 @@ export function StatusComposerMedia() {
         mediaUrl: asset.mediaUrl,
         mediaMime: asset.mediaMime,
         mediaDuration: asset.mediaDuration,
+        // Forward the Cloudinary identifiers so deleteStatus + the 24h
+        // expiry cron can destroy the asset on the CDN.
+        mediaPublicId: asset.mediaPublicId,
+        mediaResource: asset.mediaResource,
         caption: caption || undefined,
       });
       router.replace(ROUTES.STATUS);
