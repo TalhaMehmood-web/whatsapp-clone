@@ -8,10 +8,16 @@ import {
   useSendMessageMutation,
   useUploadMediaMutation,
 } from "@/tanstack/messages/mutations";
+import { useChatPrefsQuery } from "@/tanstack/users/queries";
 import { useAuthStore } from "@/stores/auth-store";
 import { queryKeys } from "@/config/query-keys";
 import { MessageType, ReceiptStatus } from "@/models/enums";
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/config/constants";
+import { downscaleImage } from "@/utils/downscale-image";
+
+// Only the single field we need — the hook reads prefs on every pick
+// event and we don't want to re-render parents on unrelated pref toggles.
+const selectUploadQuality = (prefs) => prefs?.mediaUploadQuality;
 
 // Opens a hidden <input type="file">, drops an optimistic bubble in the
 // chat (with a `blob:` preview URL so the user sees their photo/doc
@@ -22,6 +28,9 @@ export function useMediaUpload(chatId, { kind, accept } = {}) {
   const inputRef = useRef(null);
   const qc = useQueryClient();
   const me = useAuthStore((s) => s.user);
+  const { data: uploadQuality } = useChatPrefsQuery({
+    select: selectUploadQuality,
+  });
   const [progress, setProgress] = useState(null);
 
   const upload = useUploadMediaMutation();
@@ -29,15 +38,23 @@ export function useMediaUpload(chatId, { kind, accept } = {}) {
 
   const open = () => inputRef.current?.click();
 
-  const onChange = async (event) => {
-    const file = event.target.files?.[0];
+  const onChange = async (rawEvent) => {
+    const event = rawEvent;
+    const picked = event.target.files?.[0];
     event.target.value = "";
-    if (!file) return;
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (!picked) return;
+    if (picked.size > MAX_UPLOAD_BYTES) {
       toast.error(`File too large. Max ${MAX_UPLOAD_LABEL}.`);
       return;
     }
-    const resolvedKind = kind ?? kindFromMime(file.type, file.name);
+    const resolvedKind = kind ?? kindFromMime(picked.type, picked.name);
+    // STANDARD quality images get downscaled to 1280px / JPEG q=0.8 client-
+    // side before upload — matches the WhatsApp "Standard" upload quality
+    // toggle. HD ships the original bytes. Videos and docs are untouched.
+    const file =
+      resolvedKind === MessageType.IMAGE && uploadQuality !== "HD"
+        ? await downscaleImage(picked)
+        : picked;
 
     const previewUrl = URL.createObjectURL(file);
     const tempId = `temp-${Date.now()}`;

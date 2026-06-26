@@ -17,6 +17,9 @@ export function ChatSearch() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={COPY.SEARCH_PLACEHOLDER}
+          // Hook target for the global Ctrl+Alt+/ shortcut. See
+          // hooks/use-global-shortcuts.js — focusListSearch().
+          data-shortcut="chat-list-search"
           className="h-9 rounded-full border-0 bg-wa-panel-2 pl-10 text-sm shadow-none focus-visible:ring-0"
         />
       </div>

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MessageSquarePlus,
@@ -21,16 +20,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useLogoutMutation } from "@/tanstack/auth/mutations";
 import { COPY, ROUTES } from "@/config/constants";
-import { NewChatModal } from "@/features/chat/new-chat/new-chat-modal";
-import { NewGroupModal } from "@/features/chat/new-group/new-group-modal";
 import { useUiStore } from "@/stores/ui-store";
 
 export function ChatListHeader() {
   const router = useRouter();
   const { mutate: logout } = useLogoutMutation();
-  const [newChatOpen, setNewChatOpen] = useState(false);
-  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  // New-chat / new-group modal state is in the global store so the
+  // keyboard shortcuts can flip the modals open from anywhere — not just
+  // when this header is mounted.
   const openLabels = useUiStore((s) => s.openManageLabels);
+  const openNewChat = useUiStore((s) => s.openNewChat);
+  const openNewGroup = useUiStore((s) => s.openNewGroup);
 
   return (
     <>
@@ -41,7 +41,7 @@ export function ChatListHeader() {
             variant="ghost"
             size="icon"
             aria-label={COPY.NEW_CHAT}
-            onClick={() => setNewChatOpen(true)}
+            onClick={openNewChat}
             className="text-wa-text-muted hover:text-wa-text"
           >
             <MessageSquarePlus className="size-5" />
@@ -58,10 +58,10 @@ export function ChatListHeader() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => setNewChatOpen(true)}>
+              <DropdownMenuItem onClick={openNewChat}>
                 <MessageSquarePlus className="mr-2 size-4" /> {COPY.NEW_CHAT}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setNewGroupOpen(true)}>
+              <DropdownMenuItem onClick={openNewGroup}>
                 <UsersRound className="mr-2 size-4" /> {COPY.NEW_GROUP}
               </DropdownMenuItem>
               <DropdownMenuItem>
@@ -89,8 +89,6 @@ export function ChatListHeader() {
         </div>
       </header>
 
-      <NewChatModal open={newChatOpen} onOpenChange={setNewChatOpen} />
-      <NewGroupModal open={newGroupOpen} onOpenChange={setNewGroupOpen} />
     </>
   );
 }

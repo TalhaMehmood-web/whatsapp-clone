@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { SlidePane } from "@/features/layout/slide-pane/slide-pane";
@@ -13,6 +14,7 @@ import { MediaUploadSubpage } from "@/features/settings/chats/media-upload-subpa
 import { MediaAutoDownloadSubpage } from "@/features/settings/chats/media-autodl-subpage";
 import { NotificationSettings } from "@/features/settings/notifications/notification-settings";
 import { VisibilityScopeSubpage } from "@/features/settings/privacy/visibility-scope-subpage";
+import { PrivacyExceptionPicker } from "@/features/settings/privacy/privacy-exception-picker";
 import {
   usePrivacyQuery,
 } from "@/tanstack/users/queries";
@@ -21,6 +23,17 @@ import {
 } from "@/tanstack/users/mutations";
 import { COPY } from "@/config/constants";
 import { VisibilityScope } from "@/models/enums";
+
+// Maps each Privacy field to the heading shown on the picker. Keeps the
+// labels colocated with the field constants so we don't sprinkle copy
+// across the pane router.
+const EXCEPT_TITLE = {
+  lastSeen: COPY.PRIVACY_EXCEPT_LAST_SEEN,
+  profilePhoto: COPY.PRIVACY_EXCEPT_PROFILE_PHOTO,
+  about: COPY.PRIVACY_EXCEPT_ABOUT,
+  status: COPY.PRIVACY_EXCEPT_STATUS,
+  groupsPolicy: COPY.PRIVACY_EXCEPT_GROUPS,
+};
 
 // Maps a settings-pane stack id to the panel's title + content. Used by the
 // settings list to render the SlidePane stack on top of itself.
@@ -111,12 +124,28 @@ function renderPane(id) {
   }
 }
 
+// Picks the right setter for a scope change + opens the exception picker
+// if the user just selected "My contacts except…". Returns:
+//   { onChange, pickerProps, openPicker }
+// so the caller can wire whatever subset of the radio groups it needs.
+function useScopeChange(field) {
+  const update = useUpdatePrivacyMutation();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const onChange = (scope) => {
+    update.mutate({ [field]: scope });
+    if (scope === VisibilityScope.CONTACTS_EXCEPT) setPickerOpen(true);
+  };
+  return { onChange, pickerOpen, setPickerOpen };
+}
+
 // Two-radio-group layout for Last seen + online presence visibility. The
 // "When I'm online" group has a special `SAME_AS_LAST_SEEN` option that
 // mirrors whatever the last-seen scope was set to.
 function LastSeenSubpage() {
   const { data: privacy, isLoading } = usePrivacyQuery();
   const update = useUpdatePrivacyMutation();
+  const { onChange, pickerOpen, setPickerOpen } = useScopeChange("lastSeen");
 
   if (isLoading || !privacy) {
     return (
@@ -126,38 +155,63 @@ function LastSeenSubpage() {
     );
   }
 
+  const excludedIds = privacy.privacyExceptions?.lastSeen ?? [];
+  // WhatsApp rule: when Last seen is hidden from anyone (i.e. not
+  // EVERYONE), Online presence MUST mirror Last seen — you can't be
+  // visibly online to someone who can't see your last-seen. We force
+  // the toggle + disable the "Everyone" option in that case.
+  const lastSeenLockedToContacts = privacy.lastSeen !== VisibilityScope.EVERYONE;
+  const onlineMirrorsLastSeen =
+    lastSeenLockedToContacts ? true : (privacy.onlineMatchesLastSeen ?? true);
+
   return (
-    <VisibilityScopeSubpage
-      hint={COPY.PRIVACY_LAST_SEEN_HINT}
-      groups={[
-        {
-          title: COPY.PRIVACY_WHO_CAN_SEE_LAST_SEEN,
-          value: privacy.lastSeen,
-          onChange: (scope) => update.mutate({ lastSeen: scope }),
-        },
-        {
-          title: COPY.PRIVACY_WHO_CAN_SEE_ONLINE,
-          // Two options only on this group — matches WhatsApp Web.
-          options: [VisibilityScope.EVERYONE, "SAME_AS_LAST_SEEN"],
-          labels: {
-            [VisibilityScope.EVERYONE]: "Everyone",
-            SAME_AS_LAST_SEEN: COPY.PRIVACY_SAME_AS_LAST_SEEN,
+    <>
+      <VisibilityScopeSubpage
+        hint={COPY.PRIVACY_LAST_SEEN_HINT}
+        groups={[
+          {
+            title: COPY.PRIVACY_WHO_CAN_SEE_LAST_SEEN,
+            value: privacy.lastSeen,
+            onChange,
+            onPickExceptions: () => setPickerOpen(true),
+            exceptionsCount: excludedIds.length,
           },
-          // We model "same as last seen" by leaving the canonical scope
-          // alone; the value matches when no override is in play.
-          value:
-            privacy.onlineMatchesLastSeen ?? "SAME_AS_LAST_SEEN",
-          onChange: (scope) =>
-            update.mutate({ onlineMatchesLastSeen: scope }),
-        },
-      ]}
-    />
+          {
+            title: COPY.PRIVACY_WHO_CAN_SEE_ONLINE,
+            // Two options only on this group — matches WhatsApp Web.
+            options: ["EVERYONE_ONLINE", "SAME_AS_LAST_SEEN"],
+            labels: {
+              EVERYONE_ONLINE: "Everyone",
+              SAME_AS_LAST_SEEN: COPY.PRIVACY_SAME_AS_LAST_SEEN,
+            },
+            disabledOptions: lastSeenLockedToContacts
+              ? ["EVERYONE_ONLINE"]
+              : [],
+            value: onlineMirrorsLastSeen
+              ? "SAME_AS_LAST_SEEN"
+              : "EVERYONE_ONLINE",
+            onChange: (option) =>
+              update.mutate({
+                onlineMatchesLastSeen: option === "SAME_AS_LAST_SEEN",
+              }),
+          },
+        ]}
+      />
+      <PrivacyExceptionPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        field="lastSeen"
+        title={EXCEPT_TITLE.lastSeen}
+        initialExcludedIds={excludedIds}
+      />
+    </>
   );
 }
 
 function SingleScopeSubpage({ field, title }) {
   const { data: privacy, isLoading } = usePrivacyQuery();
-  const update = useUpdatePrivacyMutation();
+  const { onChange, pickerOpen, setPickerOpen } = useScopeChange(field);
+
   if (isLoading || !privacy) {
     return (
       <div className="flex justify-center py-8 text-wa-text-muted">
@@ -165,15 +219,30 @@ function SingleScopeSubpage({ field, title }) {
       </div>
     );
   }
+  const excludedIds = privacy.privacyExceptions?.[field] ?? [];
   return (
-    <VisibilityScopeSubpage
-      groups={[
-        {
-          title,
-          value: privacy[field],
-          onChange: (scope) => update.mutate({ [field]: scope }),
-        },
-      ]}
-    />
+    <>
+      <VisibilityScopeSubpage
+        groups={[
+          {
+            title,
+            value: privacy[field],
+            onChange,
+            onPickExceptions:
+              EXCEPT_TITLE[field] ? () => setPickerOpen(true) : undefined,
+            exceptionsCount: excludedIds.length,
+          },
+        ]}
+      />
+      {EXCEPT_TITLE[field] && (
+        <PrivacyExceptionPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          field={field}
+          title={EXCEPT_TITLE[field]}
+          initialExcludedIds={excludedIds}
+        />
+      )}
+    </>
   );
 }

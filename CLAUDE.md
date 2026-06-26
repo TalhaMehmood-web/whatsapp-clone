@@ -1205,15 +1205,17 @@ Pure UI — a static modal listing every shortcut. The actual key handlers go in
 
 - `Ctrl+Alt+Shift+U` mark unread, `…+E` archive, `…+/` search, `…+N` new chat, `…+↑/↓` prev/next chat, `…+P` profile, `…+Backspace` close chat, `…+M` mute, `…+Shift+P` pin, `…+F` search-in-chat, `…+L` label, `…+G` new group.
 
-### Phase S7 — Optimization audit
+### Phase S7 — Optimization audit (LANDED — rules are now enforceable)
 
-Once all screens are wired:
+Settings is wired to the four cache contracts below. Future Settings work must hold the line.
 
-1. **Single Settings prefetch** — on /settings entry, fire `getUserSettings()` once which returns `{ me, privacy, chatPrefs, notificationPrefs }` in one call. Each subpage reads from that cached blob. No N+1 queries.
-2. **Stale-while-revalidate** — settings cache stays warm for the whole session (`staleTime: Infinity`); only the explicit logout flow clears it.
-3. **Patch, don't invalidate** — audit every Settings mutation to confirm it uses `setQueryData`, not `invalidateQueries`. The Network tab should show one GET on entry and one PATCH per change — nothing else.
-4. **Field-level debouncing** — confirm Name + About fire ≤1 request per 600ms.
-5. **Single dependency reads** — chat-window, message-input, lightbox should `useUserSettingsQuery(select: prefs)` with a `select` projection so they don't re-render on unrelated changes.
+1. **`staleTime: Infinity` on every settings query** — `useMeQuery`, `usePrivacyQuery`, `useChatPrefsQuery`, `useNotifPrefsQuery`, `useBlockedUsersQuery`, `useEligibleContactsQuery`. They only change on user action, and every mutation patches the cache directly. Search and public-profile queries are excluded — they're inherently fresh-data queries.
+2. **Patch, never invalidate** — every Settings mutation follows: `onMutate` (optimistic patch) → `onError` (rollback) → `onSuccess: setQueryData(server)`. **No `onSettled: invalidate`** anywhere in the settings tree (block/unblock included). The server-returned canonical row replaces the cache on success — invalidating on top of that fires a wasteful GET per toggle.
+3. **Settings list pre-warms the four caches** — opening `/settings` calls `usePrivacyQuery() / useChatPrefsQuery() / useNotifPrefsQuery()` so opening any subpage finds the data in cache. `useMeQuery` is already warm from `useAuth()`. No bundle endpoint — four parallel GETs once per session beats the maintenance cost of a `getUserSettings()` shim that would conflict with the per-mutation cache patches.
+4. **Hot-path consumers use `select` projections** — anything that reads `useChatPrefsQuery()` from outside `/settings` (chat-wallpaper, media-preview, message-input, use-media-upload, use-theme-sync) passes a module-level selector. Wallpaper change must not re-render the composer; enterIsSend toggle must not re-render every bubble.
+5. **Free-text inputs save on confirm, not per keystroke** — `InlineEditRow` saves on the explicit Save button (not while typing). Search-style inputs (eligible-contacts picker) are local-only and never hit the network.
+
+If you add a new Settings field: prefer extending an existing row (e.g. add a column to `ChatPreferences`) and reuse `useUpdateChatPrefsMutation` rather than minting a new endpoint + key. Each new query adds a session GET and a cache-patch path to maintain.
 
 ### Build order (sequential phases — finish each before starting the next)
 

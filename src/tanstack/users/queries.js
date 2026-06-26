@@ -17,33 +17,78 @@ export const useSearchUsersQuery = (query) => {
   });
 };
 
+// Privacy is purely user-driven — it only changes when the user toggles
+// a row in Settings → Privacy, and every mutation patches the cache. We
+// can safely treat the cached value as canonical for the whole session.
 export const usePrivacyQuery = () => {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
     queryKey: queryKeys.users.privacy,
     queryFn: () => api.get(endpoints.users.privacy).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 1000 * 60,
+    staleTime: Infinity,
   });
 };
 
-export const useChatPrefsQuery = () => {
+// Lightweight friends list for the Privacy exception picker. Sorted by
+// name server-side; cached for the whole session since it only changes
+// when a friend request is accepted (the friend-request socket listener
+// invalidates the key when needed).
+export const useEligibleContactsQuery = ({ enabled = true } = {}) => {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  return useQuery({
+    queryKey: queryKeys.users.eligibleContacts,
+    queryFn: () =>
+      api.get(endpoints.users.eligibleContacts).then((r) => r.data.contacts),
+    enabled: !!accessToken && enabled,
+    staleTime: Infinity,
+  });
+};
+
+// Same rationale as usePrivacyQuery — the chat-prefs row is the source
+// for theme / wallpaper / composer flags / upload quality / auto-download.
+// Hot path: every chat bubble + the composer read from this cache. We
+// keep it warm forever so a navigation back to /settings never refetches.
+//
+// `select` lets a hot-path consumer (e.g. ChatWallpaper) subscribe to a
+// single field. TanStack memoizes the projection, so changing an
+// unrelated field (e.g. enterIsSend) never re-renders the wallpaper.
+// Pass a stable function reference — module-level constants are perfect.
+export const useChatPrefsQuery = ({ select } = {}) => {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
     queryKey: queryKeys.users.chatPrefs,
     queryFn: () => api.get(endpoints.users.chatPrefs).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 1000 * 60,
+    staleTime: Infinity,
+    select,
   });
 };
 
+// Notification kind toggles (Messages/Groups/Status/reactionSounds).
+// Cached for the whole session — only changes when the user toggles a row
+// in Settings → Notifications, which patches the cache via the mutation.
+export const useNotifPrefsQuery = () => {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  return useQuery({
+    queryKey: queryKeys.users.notifPrefs,
+    queryFn: () => api.get(endpoints.users.notifPrefs).then((r) => r.data),
+    enabled: !!accessToken,
+    staleTime: Infinity,
+  });
+};
+
+// Blocked-users list is only ever mutated by useBlockUserMutation /
+// useUnblockUserMutation, both of which patch this cache directly.
+// Cached forever to skip the refetch on every chat open + every Privacy
+// pane visit.
 export const useBlockedUsersQuery = () => {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
     queryKey: queryKeys.users.blocked,
     queryFn: () => api.get(endpoints.users.blocked).then((r) => r.data),
     enabled: !!accessToken,
-    staleTime: 1000 * 60,
+    staleTime: Infinity,
   });
 };
 

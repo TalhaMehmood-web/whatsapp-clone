@@ -15,7 +15,11 @@ import { KEYBOARD_SHORTCUTS } from "./keyboard-shortcuts-data";
 export function KeyboardShortcutsDialog({ open, onOpenChange }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      {/* Wider on large screens so the two-column grid + chord chips don't
+          force ellipses on labels like "Increase speed of selected voice
+          message". `w-[90vw]` keeps a margin off the viewport edges, and
+          the lg-and-up cap of 5xl lands at ~64rem for typical desktops. */}
+      <DialogContent className="w-[90vw] max-w-3xl lg:max-w-5xl xl:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{COPY.SHORTCUTS_TITLE}</DialogTitle>
         </DialogHeader>
@@ -27,7 +31,7 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }) {
                 key={label}
                 className="flex items-center justify-between gap-3 py-2"
               >
-                <span className="truncate text-sm text-wa-text">{label}</span>
+                <span className="text-sm text-wa-text">{label}</span>
                 <div className="flex shrink-0 items-center gap-1">
                   {keys.map((k) => (
                     <kbd

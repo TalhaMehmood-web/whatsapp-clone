@@ -183,15 +183,44 @@ export async function createMessage({
 }
 
 async function pushToPeers(message) {
-  const members = await prisma.chatMember.findMany({
-    where: { chatId: message.chatId, userId: { not: message.senderId } },
-    select: { userId: true },
-  });
+  // Resolve the recipient list AND each recipient's notification kind
+  // toggles + the chat's `isGroup` flag in one shot. Server-side
+  // enforcement: when "Messages" is off (or "Groups" off for a group
+  // chat), we skip the push entirely — the toggle isn't just for
+  // hiding the OS-level banner, it stops the wire send.
+  const [members, chat] = await Promise.all([
+    prisma.chatMember.findMany({
+      where: { chatId: message.chatId, userId: { not: message.senderId } },
+      select: {
+        userId: true,
+        user: {
+          select: {
+            notifPrefs: {
+              select: { messages: true, groups: true },
+            },
+          },
+        },
+      },
+    }),
+    prisma.chat.findUnique({
+      where: { id: message.chatId },
+      select: { isGroup: true },
+    }),
+  ]);
   const senderName = message.sender?.name ?? "New message";
   const body = previewText(message) || "Sent you a message";
+  const isGroup = !!chat?.isGroup;
+
   await Promise.all(
-    members.map((m) =>
-      sendPushTo({
+    members.map((m) => {
+      const prefs = m.user?.notifPrefs;
+      // Defaults match the schema (messages on, groups on) so users who
+      // have never visited the screen still get pushes.
+      const wantsMessages = prefs?.messages ?? true;
+      const wantsGroups = prefs?.groups ?? true;
+      if (!wantsMessages) return undefined;
+      if (isGroup && !wantsGroups) return undefined;
+      return sendPushTo({
         userId: m.userId,
         payload: {
           title: senderName,
@@ -199,8 +228,8 @@ async function pushToPeers(message) {
           tag: `chat:${message.chatId}`,
           url: ROUTES.CHAT_DETAIL(message.chatId),
         },
-      }),
-    ),
+      });
+    }),
   );
 }
 

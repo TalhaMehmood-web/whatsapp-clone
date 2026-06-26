@@ -18,6 +18,7 @@ const PUBLIC_USER_SELECT = {
   about: true,
   lastSeen: true,
   isOnline: true,
+  securityNotifications: true,
   createdAt: true,
 };
 

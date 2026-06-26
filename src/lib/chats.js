@@ -298,9 +298,18 @@ export async function startDirectChat({ userId, peerUserId }) {
   });
   if (existing) return existing;
 
+  // Seed the new chat's disappearing-messages TTL from the caller's
+  // "Default message timer" privacy setting. Existing chats stay as they
+  // are — this only fires when we mint a brand-new 1:1.
+  const callerPrivacy = await prisma.privacySettings.findUnique({
+    where: { userId },
+    select: { defaultDisappearing: true },
+  });
+
   return prisma.chat.create({
     data: {
       isGroup: false,
+      disappearingSeconds: callerPrivacy?.defaultDisappearing ?? null,
       members: {
         create: [
           { userId },

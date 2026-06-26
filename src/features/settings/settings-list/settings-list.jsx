@@ -18,6 +18,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useLogoutMutation } from "@/tanstack/auth/mutations";
+import {
+  useChatPrefsQuery,
+  useNotifPrefsQuery,
+  usePrivacyQuery,
+} from "@/tanstack/users/queries";
 import { COPY, ROUTES } from "@/config/constants";
 import { useUiStore } from "@/stores/ui-store";
 import { SettingsRow } from "./settings-row";
@@ -28,6 +33,16 @@ export function SettingsList() {
   const [search, setSearch] = useState("");
   const { mutate: logout } = useLogoutMutation();
   const openShortcuts = useUiStore((s) => s.openKeyboardShortcuts);
+
+  // Warm the four Settings caches as soon as the list mounts so opening
+  // any subpage (Profile, Privacy, Chats, Notifications) finds the data
+  // already in cache. All four use `staleTime: Infinity`, so this fires
+  // exactly once per session and the subpages render with zero spinners.
+  // The mutations patch the same keys on every change, so the warmer
+  // never needs a refetch step.
+  usePrivacyQuery();
+  useChatPrefsQuery();
+  useNotifPrefsQuery();
   const pushPane = useUiStore((s) => s.pushSettingsPane);
 
   const sections = useMemo(

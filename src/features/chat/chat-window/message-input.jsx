@@ -6,9 +6,21 @@ import { SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSendMessageMutation } from "@/tanstack/messages/mutations";
 import { useTypingEmitter } from "@/hooks/use-typing-indicator";
+import { useChatPrefsQuery } from "@/tanstack/users/queries";
 import { useUiStore } from "@/stores/ui-store";
 import { COPY } from "@/config/constants";
 import { MessageType } from "@/models/enums";
+import { replaceEmojiShortcodes } from "@/utils/emoji-shortcodes";
+
+// Module-level selector — only the three composer flags. The returned
+// shape is a fresh object each call, but TanStack's `select` only
+// re-runs when the upstream prefs row identity changes (which is
+// exactly what we want: re-project when the row mutates, skip otherwise).
+const selectComposerFlags = (prefs) => ({
+  enterIsSend: prefs?.enterIsSend ?? true,
+  spellCheck: prefs?.spellCheck ?? true,
+  replaceEmoji: prefs?.replaceTextWithEmoji ?? true,
+});
 
 import { AttachMenu } from "./attach-menu";
 import { VoiceRecorder } from "./voice-recorder";
@@ -27,11 +39,20 @@ export function MessageInput({ chatId }) {
   const reply = useUiStore((s) => s.replyByChat[chatId]);
   const setReply = useUiStore((s) => s.setReply);
 
+  // Chat-prefs drive three composer behaviours: whether bare Enter sends
+  // (vs newline), whether the textarea opts into native spell-check, and
+  // whether `:smile:` style shortcodes are expanded on send.
+  const { data: flags } = useChatPrefsQuery({ select: selectComposerFlags });
+  const enterIsSend = flags?.enterIsSend ?? true;
+  const spellCheck = flags?.spellCheck ?? true;
+  const replaceEmoji = flags?.replaceEmoji ?? true;
+
   const submit = () => {
     const trimmed = value.trim();
     if (!trimmed || sending) return;
+    const content = replaceEmoji ? replaceEmojiShortcodes(trimmed) : trimmed;
     send({
-      content: trimmed,
+      content,
       type: MessageType.TEXT,
       replyToId: reply?.id,
     });
@@ -45,9 +66,15 @@ export function MessageInput({ chatId }) {
   };
 
   const onKeyDown = (e) => {
+    // When "Enter is send" is OFF, the Enter key drops a newline and the
+    // user clicks the green send button instead — matching WhatsApp's
+    // toggle exactly. Shift+Enter always inserts a newline regardless.
     if (e.key === "Enter" && !e.shiftKey) {
+      if (!enterIsSend) return;
       e.preventDefault();
       submit();
+    } else if (e.key === "Enter" && e.shiftKey && enterIsSend) {
+      // Default browser behaviour already drops a newline; nothing to do.
     }
   };
 
@@ -91,6 +118,7 @@ export function MessageInput({ chatId }) {
             onChange={onChange}
             onKeyDown={onKeyDown}
             rows={1}
+            spellCheck={spellCheck}
             placeholder={COPY.TYPE_A_MESSAGE}
             className="block max-h-32 min-h-10 w-full resize-none rounded-lg border-0 bg-wa-panel px-3 py-2 text-sm text-wa-text placeholder:text-wa-text-muted focus:outline-none"
           />

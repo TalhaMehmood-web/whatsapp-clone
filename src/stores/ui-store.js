@@ -44,6 +44,15 @@ export const useUiStore = create((set, get) => ({
   openKeyboardShortcuts: () => set({ keyboardShortcutsOpen: true }),
   closeKeyboardShortcuts: () => set({ keyboardShortcutsOpen: false }),
 
+  // Lifted from chat-list-header so the global keyboard shortcuts can
+  // open these without the header being mounted (e.g. on /settings).
+  newChatOpen: false,
+  newGroupOpen: false,
+  openNewChat: () => set({ newChatOpen: true, newGroupOpen: false }),
+  closeNewChat: () => set({ newChatOpen: false }),
+  openNewGroup: () => set({ newGroupOpen: true, newChatOpen: false }),
+  closeNewGroup: () => set({ newGroupOpen: false }),
+
   setReply: (chatId, message) =>
     set((s) => ({
       replyByChat: { ...s.replyByChat, [chatId]: message ?? null },

@@ -4,9 +4,15 @@ import { Loader2, Mic, Play } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MessageType } from "@/models/enums";
 import { useUiStore } from "@/stores/ui-store";
+import { useChatPrefsQuery } from "@/tanstack/users/queries";
 import { queryKeys } from "@/config/query-keys";
 import { documentIcon } from "@/utils/document-icon";
 import { cn } from "@/utils/cn";
+
+// Project to just the one flag we need so changing wallpaper/theme/etc.
+// doesn't re-render every single message bubble in the open chat.
+const selectVideoPreload = (prefs) =>
+  prefs?.autoDownloadVideos === false ? "none" : "metadata";
 
 // Renders the media portion of a message bubble. The bubble itself is in
 // message-bubble; this is purely the asset preview (no caption, no time).
@@ -17,6 +23,13 @@ export function MediaPreview({ message, className }) {
   const qc = useQueryClient();
   const openLightbox = useUiStore((s) => s.openLightbox);
   const openDocPreview = useUiStore((s) => s.openDocPreview);
+  // Auto-download flags only control the *preload* behaviour: image
+  // bytes are always lazy-loaded, and videos only prefetch metadata
+  // when the user has opted in. This trims data usage on chats that
+  // are heavy on media without breaking the click-to-open flow.
+  const { data: videoPreload } = useChatPrefsQuery({
+    select: selectVideoPreload,
+  });
 
   if (!message?.mediaUrl) return null;
 
@@ -61,6 +74,7 @@ export function MediaPreview({ message, className }) {
           <img
             src={message.mediaUrl}
             alt={message.caption ?? ""}
+            loading="lazy"
             className={cn(
               "max-h-80 w-full object-cover transition-[filter]",
               isUploading
@@ -86,7 +100,7 @@ export function MediaPreview({ message, className }) {
         >
           <video
             src={message.mediaUrl}
-            preload="metadata"
+            preload={videoPreload}
             playsInline
             muted
             className={cn(

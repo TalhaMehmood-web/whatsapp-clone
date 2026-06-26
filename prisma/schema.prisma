@@ -28,6 +28,9 @@ model User {
   pushSubscription Json?
   // bcrypt hash of the secret-code used to unlock locked chats.
   lockedChatsSecret String?
+  // Whether to receive an in-app notification when the user logs in from
+  // a new device or session. WhatsApp's "Security notifications" toggle.
+  securityNotifications Boolean @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -44,6 +47,7 @@ model User {
   calls                CallParticipant[]
   privacy              PrivacySettings?
   chatPrefs            ChatPreferences?
+  notifPrefs           NotificationPreferences?
   labels               Label[]
   communityMemberships CommunityMember[]
   channelSubs          ChannelSubscriber[]
@@ -60,11 +64,23 @@ model PrivacySettings {
   about                VisibilityScope @default(CONTACTS)
   status               VisibilityScope @default(CONTACTS)
   readReceipts         Boolean         @default(true)
+  // Whether the "When I'm online" scope mirrors "Last seen". When true,
+  // online presence honours the same scope as lastSeen + its exception
+  // list. When false, online is visible to EVERYONE regardless of
+  // lastSeen — matches WhatsApp Web's two-option group.
+  onlineMatchesLastSeen Boolean        @default(true)
   groupsPolicy         VisibilityScope @default(EVERYONE)
   defaultDisappearing  Int?
   blockUnknownMessages Boolean         @default(false)
   linkPreviews         Boolean         @default(true)
   appLockEnabled       Boolean         @default(false)
+  // Per-field "My contacts except…" exclusion lists. Shape:
+  //   { lastSeen: [userId], profilePhoto: [userId], about: [userId],
+  //     status: [userId], groupsPolicy: [userId] }
+  // We store user ids only — names/avatars are resolved at read time so a
+  // contact rename doesn't need a migration. Empty arrays + missing keys
+  // are equivalent.
+  privacyExceptions    Json?
   user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -84,6 +100,22 @@ model ChatPreferences {
   outgoingSounds       Boolean      @default(false)
   backgroundSync       Boolean      @default(true)
   user                 User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// What kinds of pushes the user wants to receive. Server-enforced — when
+// `messages` is off we skip the push send entirely, not just the local
+// notification render. Toggles that only affect the on-device experience
+// (showPreviews, outgoingSounds, backgroundSync) still live on
+// ChatPreferences because they predate this table and moving them would
+// force a no-op data migration.
+model NotificationPreferences {
+  id              String  @id @default(cuid())
+  userId          String  @unique
+  messages        Boolean @default(true)
+  groups          Boolean @default(true)
+  status          Boolean @default(true)
+  reactionSounds  Boolean @default(true)
+  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

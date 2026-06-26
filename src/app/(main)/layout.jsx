@@ -9,6 +9,10 @@ import { ForwardModalHost } from "@/features/chat/chat-window/forward-modal";
 import { MediaLightboxHost } from "@/features/chat/media-lightbox/media-lightbox";
 import { EditMessageDialogHost } from "@/features/chat/chat-window/edit-message-dialog";
 import { DocumentPreviewerHost } from "@/features/chat/chat-window/document-previewer-host";
+import { ChatPrefsBridge } from "@/features/settings/shared/chat-prefs-bridge";
+import { GlobalShortcutsBridge } from "@/features/settings/keyboard-shortcuts/global-shortcuts-bridge";
+import { NewChatHost } from "@/features/chat/new-chat/new-chat-host";
+import { NewGroupHost } from "@/features/chat/new-group/new-group-host";
 
 export default function MainLayout({ children }) {
   return (
@@ -28,6 +32,10 @@ export default function MainLayout({ children }) {
         <MediaLightboxHost />
         <EditMessageDialogHost />
         <DocumentPreviewerHost />
+        <NewChatHost />
+        <NewGroupHost />
+        <ChatPrefsBridge />
+        <GlobalShortcutsBridge />
       </SocketBoundary>
     </AuthGuard>
   );

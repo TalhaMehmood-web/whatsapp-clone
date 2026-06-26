@@ -11,10 +11,16 @@ function ScrollArea({
   ...props
 }) {
   return (
-    <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn("relative", className)} {...props}>
+    <ScrollAreaPrimitive.Root data-slot="scroll-area" className={cn("relative overflow-hidden", className)} {...props}>
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1">
+        // `[&>div]:!block` is critical: Radix wraps the viewport's
+        // children in a div with `display: table` to support sticky
+        // headers. That breaks any descendant that uses `flex-1` /
+        // `min-h-0` because the table cell never collapses, so the
+        // ScrollArea reports zero overflow and never scrolls. Forcing
+        // the wrapper to `display: block` restores normal flow.
+        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none [&>div]:block! focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1">
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />

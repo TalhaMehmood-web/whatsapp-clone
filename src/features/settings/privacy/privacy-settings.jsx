@@ -20,6 +20,10 @@ import {
   SettingToggleRow,
 } from "@/features/settings/shared/setting-toggle-row";
 import { BlockedContactsSheet } from "./blocked-contacts-sheet";
+import {
+  DisappearingDefaultDialog,
+  formatDisappearingDefault,
+} from "./disappearing-default-dialog";
 
 const SCOPE_LABEL = {
   [VisibilityScope.EVERYONE]: "Everyone",
@@ -28,12 +32,25 @@ const SCOPE_LABEL = {
   [VisibilityScope.NOBODY]: "Nobody",
 };
 
+// When the scope is CONTACTS_EXCEPT, the Privacy index row shows the
+// excluded-count instead of the generic label so users can see at a
+// glance how many contacts they've hidden from.
+function scopeSublabel(privacy, field) {
+  const scope = privacy[field];
+  if (scope !== VisibilityScope.CONTACTS_EXCEPT) {
+    return SCOPE_LABEL[scope] ?? "Not set";
+  }
+  const count = privacy.privacyExceptions?.[field]?.length ?? 0;
+  return `${count} ${count === 1 ? "contact" : "contacts"} excluded`;
+}
+
 export function PrivacySettings({ inline = false }) {
   const { data: privacy, isLoading } = usePrivacyQuery();
   const { data: blocked } = useBlockedUsersQuery();
   const update = useUpdatePrivacyMutation();
   const pushPane = useUiStore((s) => s.pushSettingsPane);
   const [blockedOpen, setBlockedOpen] = useState(false);
+  const [disappearingOpen, setDisappearingOpen] = useState(false);
 
   if (isLoading || !privacy) {
     return (
@@ -49,7 +66,7 @@ export function PrivacySettings({ inline = false }) {
   const scopeRow = (title, field, paneId) => (
     <SettingNavRow
       title={title}
-      value={SCOPE_LABEL[privacy[field]] ?? "Not set"}
+      value={scopeSublabel(privacy, field)}
       onClick={() => pushPane(paneId)}
     />
   );
@@ -73,14 +90,11 @@ export function PrivacySettings({ inline = false }) {
 
       <Separator className="my-2" />
       <SettingsGroupLabel>{COPY.PRIVACY_DISAPPEARING_TITLE}</SettingsGroupLabel>
-      <div className="px-6 py-3">
-        <p className="text-sm text-wa-text">{COPY.PRIVACY_DEFAULT_TIMER}</p>
-        <p className="text-xs text-wa-text-muted">
-          {privacy.defaultDisappearing
-            ? `${privacy.defaultDisappearing}s`
-            : "Off"}
-        </p>
-      </div>
+      <SettingNavRow
+        title={COPY.PRIVACY_DEFAULT_TIMER}
+        value={formatDisappearingDefault(privacy.defaultDisappearing)}
+        onClick={() => setDisappearingOpen(true)}
+      />
 
       <Separator className="my-2" />
       {scopeRow(COPY.PRIVACY_GROUPS, "groupsPolicy", "privacy:groups")}
@@ -99,9 +113,10 @@ export function PrivacySettings({ inline = false }) {
 
       <SettingToggleRow
         title={COPY.PRIVACY_APP_LOCK}
-        description={COPY.PRIVACY_APP_LOCK_DESC}
-        checked={privacy.appLockEnabled}
-        onChange={patch("appLockEnabled")}
+        description={COPY.PRIVACY_APP_LOCK_COMING}
+        checked={false}
+        onChange={() => {}}
+        disabled
       />
 
       <Separator className="my-2" />
@@ -122,6 +137,10 @@ export function PrivacySettings({ inline = false }) {
       <BlockedContactsSheet
         open={blockedOpen}
         onOpenChange={setBlockedOpen}
+      />
+      <DisappearingDefaultDialog
+        open={disappearingOpen}
+        onOpenChange={setDisappearingOpen}
       />
     </SettingsSection>
   );
