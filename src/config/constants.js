@@ -173,6 +173,11 @@ export const COPY = Object.freeze({
   NAV_META_AI: "Meta AI",
   NAV_ARCHIVED: "Archived",
   NAV_PROFILE: "Profile",
+  NAV_SETTINGS: "Settings",
+  NAV_NOTIFICATIONS: "Notifications",
+  NAV_MORE: "More",
+  NAV_MORE_SHEET_TITLE: "All sections",
+  NAV_MORE_SHEET_DESC: "Reach the rest of WhatsApp from here.",
   // New chat modal
   NEW_CHAT_TITLE: "New chat",
   NEW_CHAT_DESCRIPTION:

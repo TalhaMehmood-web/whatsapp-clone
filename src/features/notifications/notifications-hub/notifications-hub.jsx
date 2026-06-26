@@ -112,7 +112,10 @@ const RailTrigger = forwardRef(function RailTrigger(
   );
 });
 
-// Tab-bar style trigger for the mobile bottom bar.
+// Tab-bar style trigger for the mobile bottom bar. `flex-1` shares slot
+// width evenly with the surrounding tabs — no `max-w-` because the
+// bottom bar is now a 6-slot layout (5 link tabs + More sheet) and we
+// want each slot to claim the same fraction.
 const CompactTrigger = forwardRef(function CompactTrigger(
   { unread, active, ...props },
   ref,
@@ -123,7 +126,7 @@ const CompactTrigger = forwardRef(function CompactTrigger(
       type="button"
       aria-label={COPY.NAV_NOTIFICATIONS}
       className={cn(
-        "relative flex h-full min-w-0 max-w-[20%] flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px]",
+        "relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px]",
         active ? "text-wa-green" : "text-wa-text-muted",
       )}
       {...props}
