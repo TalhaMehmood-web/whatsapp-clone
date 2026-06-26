@@ -2,7 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "_comment": "Hobby plan allows once per day. Pro allows hourly (`0 * * * *`). Edit if you're on Pro.",
       "path": "/api/cron/status-expire",
       "schedule": "0 0 * * *"
     }
