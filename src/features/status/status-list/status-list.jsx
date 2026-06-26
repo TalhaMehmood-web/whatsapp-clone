@@ -1,20 +1,57 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, MoreVertical, Plus } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Camera,
+  Loader2,
+  Lock,
+  MoreVertical,
+  Pencil,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useStatusFeedQuery } from "@/tanstack/status/queries";
 import { useAuth } from "@/hooks/use-auth";
+import { useUiStore } from "@/stores/ui-store";
+import { queryKeys } from "@/config/query-keys";
 import { COPY, ROUTES } from "@/config/constants";
 import { statusTime } from "@/utils/date-format";
 import { StatusListItem } from "./status-list-item";
 import { StatusRingAvatar } from "./status-ring-avatar";
 
 export function StatusList() {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const pushSettingsPane = useUiStore((s) => s.pushSettingsPane);
   const { data, isLoading } = useStatusFeedQuery();
   const { user } = useAuth();
+
+  const newText = () => router.push(`${ROUTES.STATUS}/new?type=text`);
+  const newMedia = () => router.push(`${ROUTES.STATUS}/new?type=media`);
+
+  // 3-dot menu actions. "Status privacy" jumps to the existing Privacy
+  // pane (the "Status" visibility row is already there). "Refresh"
+  // re-fetches the status feed — the query is staleTime: Infinity so a
+  // manual refetch is the only way to pick up something added on
+  // another device.
+  const openPrivacy = () => {
+    router.push(ROUTES.SETTINGS);
+    pushSettingsPane("privacy:status");
+  };
+  const refreshFeed = () =>
+    qc.invalidateQueries({ queryKey: queryKeys.status.list });
 
   const mine = data?.mine ?? [];
   const contacts = data?.contacts ?? [];
@@ -35,19 +72,54 @@ export function StatusList() {
           {COPY.STATUS_TITLE}
         </h1>
         <div className="flex items-center gap-1 text-wa-text-muted">
-          <Button asChild variant="ghost" size="icon" aria-label="New status">
-            <Link href={`${ROUTES.STATUS}/new`}>
-              <Plus className="size-5" />
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="More"
-            className="hover:text-wa-text"
-          >
-            <MoreVertical className="size-5" />
-          </Button>
+          {/* `+` opens a tiny menu so the user can pick text vs
+              photo/video on mobile. The desktop empty-pane keeps the
+              two big buttons — this is the parity affordance for small
+              screens that don't see that pane. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={COPY.STATUS_NEW_MENU_LABEL}
+                className="hover:text-wa-text"
+              >
+                <Plus className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={newText}>
+                <Pencil className="mr-2 size-4" /> {COPY.STATUS_TEXT_BUTTON}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={newMedia}>
+                <Camera className="mr-2 size-4" /> {COPY.STATUS_MEDIA_BUTTON}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* 3-dot menu. Was a dead button — now opens the same actions
+              the desktop overflow would. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="More"
+                className="hover:text-wa-text"
+              >
+                <MoreVertical className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={openPrivacy}>
+                <Lock className="mr-2 size-4" /> {COPY.STATUS_MENU_PRIVACY}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={refreshFeed}>
+                <RefreshCw className="mr-2 size-4" /> {COPY.STATUS_MENU_REFRESH}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -72,13 +144,35 @@ export function StatusList() {
                 </AvatarFallback>
               </Avatar>
             )}
-            <Link
-              href={`${ROUTES.STATUS}/new`}
-              onClick={(e) => e.stopPropagation()}
-              className="absolute -bottom-0.5 -right-0.5 grid size-5 place-items-center rounded-full border-2 border-wa-panel bg-wa-green"
-            >
-              <Plus className="size-3 text-white" />
-            </Link>
+            {/* The little + badge over the avatar opens the same picker
+                as the header + so the user can choose text vs media
+                without leaving the list. stopPropagation prevents the
+                outer Link from also navigating to the viewer. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                asChild
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+              >
+                <button
+                  type="button"
+                  aria-label={COPY.STATUS_NEW_MENU_LABEL}
+                  className="absolute -bottom-0.5 -right-0.5 grid size-5 place-items-center rounded-full border-2 border-wa-panel bg-wa-green"
+                >
+                  <Plus className="size-3 text-white" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onClick={newText}>
+                  <Pencil className="mr-2 size-4" /> {COPY.STATUS_TEXT_BUTTON}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={newMedia}>
+                  <Camera className="mr-2 size-4" /> {COPY.STATUS_MEDIA_BUTTON}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm text-wa-text">
