@@ -12,6 +12,11 @@ export const endpoints = {
     refresh: `${BASE}/auth/refresh`,
     me: `${BASE}/users/me`,
   },
+  realtime: {
+    // Provider-agnostic subscription authoriser. Same URL whether the
+    // adapter under the hood is Pusher, Ably, or anything else later.
+    auth: `${BASE}/realtime/auth`,
+  },
   chats: {
     list: `${BASE}/chats`,
     archived: `${BASE}/chats/archived`,
@@ -28,6 +33,7 @@ export const endpoints = {
     unread: (id) => `${BASE}/chats/${id}/unread`,
     clear: (id) => `${BASE}/chats/${id}/clear`,
     lock: (id) => `${BASE}/chats/${id}/lock`,
+    typing: (id) => `${BASE}/chats/${id}/typing`,
     locked: `${BASE}/chats/locked`,
     disappearing: (id) => `${BASE}/chats/${id}/disappearing`,
   },
@@ -80,6 +86,7 @@ export const endpoints = {
     list: `${BASE}/calls`,
     detail: (id) => `${BASE}/calls/${id}`,
     join: `${BASE}/calls/join`,
+    signal: `${BASE}/calls/signal`,
   },
   search: {
     global: `${BASE}/search`,

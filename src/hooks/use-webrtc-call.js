@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSocketStore } from "@/stores/socket-store";
+import api from "@/config/axios-instance";
+import { endpoints } from "@/config/endpoints";
 import { SOCKET_EVENT } from "@/config/constants";
 import { CallStatus, CallType } from "@/models/enums";
 
@@ -33,16 +35,25 @@ export function useWebRtcCall({ callId, peerId, type, role, callStatus }) {
 
   const wantsVideo = type === CallType.VIDEO;
 
+  // History: this used to client-emit `CALL_SIGNAL` over Socket.io.
+  // Pusher has no client-emit path, so we POST to /api/calls/signal and
+  // the server forwards on the destination user's private channel. Same
+  // payload shape — adds ~30ms per signaling message (negligible vs the
+  // total handshake duration).
   const send = useCallback(
     (payload) => {
-      if (!socket || !peerId) return;
-      socket.emit(SOCKET_EVENT.CALL_SIGNAL, {
-        ...payload,
-        callId,
-        toUserId: peerId,
-      });
+      if (!peerId) return;
+      api
+        .post(endpoints.calls.signal, {
+          ...payload,
+          callId,
+          toUserId: peerId,
+        })
+        .catch((err) => {
+          console.warn("call signal failed", err?.response?.status);
+        });
     },
-    [socket, peerId, callId],
+    [peerId, callId],
   );
 
   // Build the peer connection + grab local media once we know the role.

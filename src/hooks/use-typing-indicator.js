@@ -1,16 +1,32 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+
 import { useSocketStore } from "@/stores/socket-store";
 import { useUiStore } from "@/stores/ui-store";
+import api from "@/config/axios-instance";
+import { endpoints } from "@/config/endpoints";
 import { SOCKET_EVENT } from "@/config/constants";
 
 const STOP_DEBOUNCE_MS = 1500;
 
-// Emits typing:start once when the user starts typing, then typing:stop after
-// 1.5s of inactivity. Mounted inside the message input.
+// Calls the typing endpoint once when the user starts typing, then once
+// more after 1.5s of inactivity. Mounted inside the message input.
+//
+// History: this used to client-emit `typing:start` / `typing:stop` over
+// Socket.io. Pusher (and most managed realtime services) don't accept
+// client-emitted events without an extra auth handshake, so we route
+// through `POST /api/chats/{id}/typing` instead. The server triggers the
+// TYPING_UPDATE event on the chat channel. Same UX, server-validated.
+function postTyping(chatId, typing) {
+  // Fire-and-forget. A failed typing notification isn't worth surfacing
+  // to the user — they're still typing.
+  api
+    .post(endpoints.chats.typing(chatId), { typing })
+    .catch(() => {});
+}
+
 export function useTypingEmitter(chatId) {
-  const socket = useSocketStore((s) => s.socket);
   const isTypingRef = useRef(false);
   const timeoutRef = useRef(null);
 
@@ -18,23 +34,24 @@ export function useTypingEmitter(chatId) {
   useEffect(
     () => () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (isTypingRef.current && socket) {
-        socket.emit(SOCKET_EVENT.TYPING_STOP, { chatId });
+      if (isTypingRef.current && chatId) {
+        postTyping(chatId, false);
+        isTypingRef.current = false;
       }
     },
-    [chatId, socket],
+    [chatId],
   );
 
   return function notifyTyping() {
-    if (!socket) return;
+    if (!chatId) return;
     if (!isTypingRef.current) {
       isTypingRef.current = true;
-      socket.emit(SOCKET_EVENT.TYPING_START, { chatId });
+      postTyping(chatId, true);
     }
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
       isTypingRef.current = false;
-      socket.emit(SOCKET_EVENT.TYPING_STOP, { chatId });
+      postTyping(chatId, false);
     }, STOP_DEBOUNCE_MS);
   };
 }

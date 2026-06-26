@@ -1228,3 +1228,69 @@ If you add a new Settings field: prefer extending an existing row (e.g. add a co
 | S5    | Notifications | Smallest scope; mostly toggles |
 | S6    | Keyboard shortcuts | Pure UI; can ship anytime |
 | S7    | Optimization pass | Must run last so we can audit the full surface |
+
+---
+
+## Realtime migration — Socket.io → Pusher Channels (planned, not started)
+
+Vercel can't host a long-lived WebSocket server, so the custom `server.js` + Socket.io stack only works in local dev or on a VM. We're migrating to **Pusher Channels** (managed pub/sub) so the same Next.js app deploys cleanly to Vercel without changing any feature semantics.
+
+### Why Pusher specifically
+
+- Free tier: 100 concurrent connections + 200k msgs/day + unlimited channels. No card.
+- Maps 1:1 to our existing Socket.io semantics — channels, events, presence, server-trigger.
+- Server SDK is built for serverless (`pusher.trigger(...)` is a single HTTPS call), so it works inside route handlers without a persistent process.
+- Presence channels handle the "who's online" join/leave broadcast natively — we delete our manual `user:online` / `user:offline` plumbing.
+- WebRTC signaling rides on the same channels (small JSON payloads for SDP + ICE). Voice/video 1:1 keeps working; media still flows browser-to-browser over WebRTC + Google STUN.
+
+### What we keep, what we lose, what we accept
+
+**Keep**: every realtime feature — message fan-out, typing, read receipts, presence, reactions, friend requests, message edits/deletes/purges, group changes, call signaling, 1:1 voice/video.
+
+**Lose**:
+- Sub-50ms event latency (Pusher adds ~80–120ms vs Socket.io). Imperceptible for chat UX.
+- Group video calls beyond 3 people. They weren't reliable on Socket.io either (would need a real SFU like LiveKit, outside the free-tier scope).
+- The custom `server.js` entry point. Vercel runs the standard Next.js handler.
+
+**Accept**: a per-action `pusher.trigger()` HTTPS round-trip in the request path (route handler → Pusher → subscribers) instead of an in-process `io.to().emit()`. Adds ~30–50ms to write-path latency for an authoritative DB write, well below human perception.
+
+### Channel + auth design
+
+| Channel name | Type | Who subscribes | Used for |
+| ------------ | ---- | -------------- | -------- |
+| `private-user-{userId}` | Private | Just that user (any tab/device) | Direct events: friend requests, notifications, call signal, group add/remove |
+| `private-chat-{chatId}` | Private | Every chat member | Chat fan-out: new message, edit, delete, react, typing, read receipt, pin |
+| `presence-online` | Presence | Every authenticated user | Online/offline broadcast (replaces manual `user:online` / `user:offline`) |
+
+- `private-` and `presence-` channels require a server-signed subscription. We add **`POST /api/pusher/auth`** that verifies the user's JWT (reusing `requireAuth`) and authorises subscriptions only for channels the user is allowed to see (you can subscribe to your own user channel and chats you're a member of; nothing else).
+- We do NOT use Pusher's client-event feature (`client-typing`) — typing flows through our API route so server-side membership/block checks still apply. Same shape as today.
+
+### Migration phases
+
+| Phase | What | Why this order |
+| ----- | ---- | -------------- |
+| P1    | **Account + env setup** — create Pusher app, add `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER`, `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER` to `.env.local`. Document required vars in CLAUDE.md. | Nothing else compiles without these. |
+| P2    | **`src/lib/pusher.js` server SDK** — single Pusher instance, `triggerToChat(chatId, event, payload)` + `triggerToUser(userId, event, payload)` mirroring our current `emitToChat` / `emitToUser` signatures. No call sites change yet. | Drop-in replacement at the lib boundary. Every existing `emitToChat` callsite becomes `triggerToChat` with the same args. |
+| P3    | **Auth route — `POST /api/pusher/auth`** — verifies JWT, authorises subscription only for the user's own private channel + chats they're a member of (+ presence-online). | All private-channel subscribes block until this exists. |
+| P4    | **Swap server emits** — replace every `emitToChat` / `emitToUser` import + call in `lib/messages.js`, `lib/groups.js`, `lib/friend-requests.js`, `lib/calls.js`, `lib/notifications.js`, `lib/reactions.js`, `lib/receipts.js`. Delete `src/lib/socket-server.js`. | Touches every fan-out; do it once. The Pusher server SDK runs anywhere, so each call site keeps working in dev + on Vercel. |
+| P5    | **Client `src/lib/pusher-client.js`** — single `Pusher` instance auth'd via `/api/pusher/auth`. New `usePusher()` hook replaces `useSocket()`. `socket-store` → `pusher-store` (single client + connected flag). | Establishes the new client primitive. Hook signature stays the same so feature-level sync hooks change minimally. |
+| P6    | **Migrate sync hooks** — `use-chat-socket-sync`, `use-friend-requests-sync`, `use-notifications-sync`, `use-call-events`, `use-online-status`, `use-typing-indicator`, `chat-room-presence`. Each swaps `socket.on(event, fn)` for `channel.bind(event, fn)` and `socket.emit(event, data)` for an API call (typing endpoint) or a client-event (never used — we route through API). | Behaviour unchanged. One-by-one swap reduces blast radius. |
+| P7    | **Presence channel** — subscribe to `presence-online` from `usePusher`. Delete the manual `USER_ONLINE` / `USER_OFFLINE` emits + listeners. `use-online-status` reads presence from `presence-online` instead. | Removes ~20 LOC of manual presence bookkeeping. |
+| P8    | **Typing as API call** — `POST /api/chats/[id]/typing` with `{ typing: true/false }`. Server triggers `private-chat-{id}` with the typing event. Removes the last client-emit. | Last piece of `socket.emit` from the client. |
+| P9    | **Delete `server.js`** — remove `socket.io` + `socket.io-client` from package.json. Update `package.json` scripts: `dev: next dev`, `start: next start`. Update CLAUDE.md "Stack" table. | Nothing references either dep at this point. |
+| P10   | **Vercel deploy** — push to GitHub, connect Vercel project, paste env vars, deploy. Smoke-test 1:1 chat + voice call between two browser windows. | Final verification that the migration delivered the goal. |
+
+### Cross-cutting rules
+
+- **No `client-` events.** Every realtime action that originates on the client (send message, react, mark read, typing) goes through an API route, which writes to Postgres AND calls `pusher.trigger()`. Same shape as today; we keep server-side validation + privacy gating.
+- **Channel auth is the security boundary.** `POST /api/pusher/auth` is the single place that decides who can subscribe to what. If a future feature adds a new channel pattern, the auth route handles it — don't sprinkle authorisation logic into trigger call sites.
+- **Single Pusher client.** One instance per browser tab, mounted at the (main) layout, lifetime tied to the access token (same shape as `useSocket` today).
+- **Don't fan out to the sender.** Today we use `io.to(`chat:${id}`).emit(...)` which includes the sender; we keep that behaviour for compatibility with `useChatSocketSync` (so the sender's other tabs stay in sync). Pusher's default is sender-included on `pusher.trigger()` — matches.
+- **No schema changes.** This is wire-protocol only. Prisma stays exactly as is.
+- **CLAUDE.md "Socket.io (custom server)" section is rewritten** when P9 lands — replaced with a "Realtime (Pusher Channels)" section that documents the channel namespaces + auth route. The migration plan section itself is deleted then since it's no longer planned.
+
+### What to do before P1 starts
+
+- Sign up at pusher.com (no card). Create a Channels app. Pick the cluster closest to your users (US-east is fine for now).
+- Grab `app_id`, `key`, `secret`, `cluster` from the app dashboard.
+- Have them ready before invoking P1 so the env step doesn't block.
