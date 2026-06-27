@@ -1,5 +1,7 @@
 import { prisma } from "./prisma.js";
 import { listFriends } from "./friend-requests.js";
+import { triggerToUser } from "./realtime/server.js";
+import { SOCKET_EVENT } from "@/config/constants";
 
 // The five Privacy rows that support a "My contacts except…" picker. We
 // gate writes through this list so a typo client-side can't poison the
@@ -27,7 +29,7 @@ const PUBLIC_SELECT = {
 };
 
 export async function updateMe({ userId, name, about, avatar, securityNotifications }) {
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: {
       ...(name !== undefined ? { name: name.trim() } : {}),
@@ -39,6 +41,44 @@ export async function updateMe({ userId, name, about, avatar, securityNotificati
     },
     select: PUBLIC_SELECT,
   });
+
+  // Fan a USER_PROFILE_UPDATED event to every accepted friend so their
+  // caches that carry a stale copy of this user (chat lists, peers,
+  // members, message senders, public profile) patch live without the
+  // friend needing to re-login. Only emit when something user-visible
+  // actually changed; securityNotifications doesn't surface elsewhere
+  // so we skip the fanout for that branch alone.
+  const userVisibleChange =
+    name !== undefined || about !== undefined || avatar !== undefined;
+  if (userVisibleChange) {
+    fanoutProfileToFriends(userId, {
+      id: updated.id,
+      name: updated.name,
+      avatar: updated.avatar,
+      about: updated.about,
+    });
+  }
+
+  return updated;
+}
+
+// Best-effort broadcast to every accepted friend's per-user channel.
+// Never awaited — a Pusher hiccup shouldn't slow down the profile-save
+// HTTP response. listFriends is cheap; if it throws, the only
+// consequence is friends keep stale data until their next refetch.
+async function fanoutProfileToFriends(userId, payload) {
+  try {
+    const friends = await listFriends(userId);
+    await Promise.all(
+      friends.map((f) =>
+        triggerToUser(f.id, SOCKET_EVENT.USER_PROFILE_UPDATED, payload).catch(
+          () => {},
+        ),
+      ),
+    );
+  } catch {
+    // Swallow — profile is already saved, fanout failure is recoverable.
+  }
 }
 
 // Hard-deletes the user and every owned row. Most relations cascade in

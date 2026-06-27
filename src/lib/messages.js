@@ -129,7 +129,12 @@ export async function createMessage({
     ? new Date(Date.now() + chatMeta.disappearingSeconds * 1000)
     : null;
 
-  const message = await prisma.$transaction(async (tx) => {
+  // Keep the interactive transaction short — Prisma's default timeout
+  // is 5s and a cold Neon connection plus 4 writes can push past it.
+  // We do the bare minimum inside (create + counter bumps + receipt
+  // seed) and the include-with-receipts re-fetch OUTSIDE the tx once
+  // it's committed.
+  const createdId = await prisma.$transaction(async (tx) => {
     const created = await tx.message.create({
       data: {
         chatId,
@@ -149,14 +154,7 @@ export async function createMessage({
         expiresAt,
         metadata: metadata ?? undefined,
       },
-      include: {
-        sender: { select: { id: true, name: true, avatar: true } },
-        replyTo: {
-          select: { id: true, content: true, type: true, senderId: true },
-        },
-        reactions: true,
-        receipts: true,
-      },
+      select: { id: true },
     });
 
     // Touch chat updatedAt so the list re-sorts.
@@ -192,24 +190,24 @@ export async function createMessage({
       skipDuplicates: true,
     });
 
-    // Re-fetch the message WITH receipts so the broadcast payload
-    // includes them. Without this, peers patch their cache with
-    // `receipts: []` (because the initial include ran BEFORE the seed
-    // above), and every subsequent MESSAGE_READ / MESSAGE_DELIVERED
-    // patch becomes a no-op since `m.receipts.map(...)` operates on
-    // an empty array. Result: the sender's tick stayed single-grey
-    // forever, even after the receiver read the message.
-    return tx.message.findUnique({
-      where: { id: created.id },
-      include: {
-        sender: { select: { id: true, name: true, avatar: true } },
-        replyTo: {
-          select: { id: true, content: true, type: true, senderId: true },
-        },
-        reactions: true,
-        receipts: true,
+    return created.id;
+  });
+
+  // Re-fetch the message WITH receipts outside the transaction. This
+  // is the payload that gets broadcast; without the seeded receipts on
+  // it, every later MESSAGE_READ / MESSAGE_DELIVERED patch would be a
+  // no-op (`m.receipts.map(...)` on an empty array). Receipts are now
+  // committed so the read is safe.
+  const message = await prisma.message.findUnique({
+    where: { id: createdId },
+    include: {
+      sender: { select: { id: true, name: true, avatar: true } },
+      replyTo: {
+        select: { id: true, content: true, type: true, senderId: true },
       },
-    });
+      reactions: true,
+      receipts: true,
+    },
   });
 
   // Fan-out is FIRE-AND-FORGET — the API returns the message immediately

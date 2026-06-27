@@ -142,6 +142,12 @@ export const SOCKET_EVENT = Object.freeze({
   // minimal — the client invalidates the feed query and re-renders.
   STATUS_NEW: "status:new",
   STATUS_DELETED: "status:deleted",
+  // Profile metadata fanout. Fired on every friend's per-user channel
+  // when the user updates their name, avatar, or about. Lets caches
+  // that carry { id, name, avatar, about }-shaped sub-objects (chat
+  // lists, chat detail peers, members, message senders, /u/{handle}
+  // profile) update live without the friend re-logging in.
+  USER_PROFILE_UPDATED: "user:profile:updated",
 });
 
 // ─── Local storage keys ────────────────────────────────────────────────────

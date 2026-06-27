@@ -8,6 +8,7 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useFriendRequestsSync } from "@/hooks/use-friend-requests-sync";
 import { useNotificationsSync } from "@/hooks/use-notifications-sync";
 import { useStatusSync } from "@/hooks/use-status-sync";
+import { useUserProfileSync } from "@/hooks/use-user-profile-sync";
 import { useCallEvents } from "@/hooks/use-call-events";
 import { useHeartbeat } from "@/hooks/use-heartbeat";
 
@@ -22,6 +23,7 @@ export function SocketBoundary({ children }) {
   useFriendRequestsSync();
   useNotificationsSync();
   useStatusSync();
+  useUserProfileSync();
   useHeartbeat();
   useCallEvents();
   return children;
