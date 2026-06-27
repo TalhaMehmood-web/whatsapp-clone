@@ -45,11 +45,19 @@ function SheetOverlay({
   );
 }
 
+// `showCloseButton` defaults to FALSE here even though shadcn ships it
+// as true. Every consumer in this app already draws its own close /
+// back arrow inside its header (the WhatsApp Web pattern: arrow on the
+// left, no X on the right). Defaulting to true was painting a second
+// X over those headers — see the duplicate cross icon the user
+// reported in contact-info, group-info, media-browser etc. Any sheet
+// that genuinely wants the built-in X (a quick utility sheet without a
+// custom header) can opt in by passing `showCloseButton`.
 function SheetContent({
   className,
   children,
   side = "right",
-  showCloseButton = true,
+  showCloseButton = false,
   ...props
 }) {
   return (

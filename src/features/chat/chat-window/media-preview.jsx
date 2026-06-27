@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Mic, Play } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MessageType } from "@/models/enums";
 import { useUiStore } from "@/stores/ui-store";
@@ -8,6 +8,8 @@ import { useChatPrefsQuery } from "@/tanstack/users/queries";
 import { queryKeys } from "@/config/query-keys";
 import { documentIcon } from "@/utils/document-icon";
 import { cn } from "@/utils/cn";
+
+import { VoiceNotePlayer } from "./voice-note-player";
 
 // Project to just the one flag we need so changing wallpaper/theme/etc.
 // doesn't re-render every single message bubble in the open chat.
@@ -75,8 +77,11 @@ export function MediaPreview({ message, className }) {
             src={message.mediaUrl}
             alt={message.caption ?? ""}
             loading="lazy"
+            // `object-contain` so portraits + landscapes both render at
+            // their real aspect ratio inside the bubble — the previous
+            // `object-cover` cropped tall photos to a strip.
             className={cn(
-              "max-h-80 w-full object-cover transition-[filter]",
+              "max-h-80 w-full object-contain transition-[filter]",
               isUploading
                 ? "cursor-default brightness-50"
                 : "cursor-zoom-in",
@@ -103,8 +108,11 @@ export function MediaPreview({ message, className }) {
             preload={videoPreload}
             playsInline
             muted
+            // Same reason as the image branch: default video object-fit
+            // is `fill` which distorts. `contain` keeps the original
+            // aspect ratio inside the bubble.
             className={cn(
-              "max-h-80 w-full transition-[filter]",
+              "max-h-80 w-full object-contain transition-[filter]",
               isUploading && "brightness-50",
             )}
           />
@@ -131,19 +139,12 @@ export function MediaPreview({ message, className }) {
 
     case MessageType.VOICE_NOTE:
       return (
-        <div className={cn("flex w-64 items-center gap-2", className)}>
-          <button
-            type="button"
-            className="flex size-9 items-center justify-center rounded-full bg-wa-green text-white"
-            aria-label="Play voice note"
-          >
-            <Play className="size-4" />
-          </button>
-          <div className="flex-1">
-            <audio src={message.mediaUrl} controls className="w-full" />
-          </div>
-          <Mic className="size-4 text-wa-text-muted" />
-        </div>
+        <VoiceNotePlayer
+          src={message.mediaUrl}
+          durationSec={message.mediaDuration ?? null}
+          seed={message.id}
+          className={className}
+        />
       );
 
     case MessageType.DOCUMENT: {

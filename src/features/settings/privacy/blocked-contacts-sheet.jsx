@@ -24,7 +24,11 @@ export function BlockedContactsSheet({ open, onOpenChange }) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[28rem] flex-col p-0">
+      <SheetContent
+        side="right"
+        showCloseButton
+        className="flex w-full flex-col p-0 sm:max-w-md"
+      >
         <SheetHeader className="px-6 pb-3 pt-6">
           <SheetTitle>{COPY.BLOCKED_CONTACTS}</SheetTitle>
           <SheetDescription>

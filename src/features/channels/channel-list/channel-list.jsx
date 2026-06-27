@@ -1,19 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, MoreVertical, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Compass, Loader2, MoreVertical, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChannelsQuery } from "@/tanstack/channels/queries";
-import { COPY } from "@/config/constants";
+import { COPY, ROUTES } from "@/config/constants";
 import { ChannelRow } from "./channel-row";
 import { NewChannelModal } from "@/features/channels/new-channel/new-channel-modal";
 
 export function ChannelList() {
+  const router = useRouter();
   const { data, isLoading } = useChannelsQuery();
   const subscribed = data?.subscribed ?? [];
   const suggested = data?.suggested ?? [];
   const [createOpen, setCreateOpen] = useState(false);
+
+  const openExplore = () => router.push(`${ROUTES.CHANNELS}/explore`);
 
   return (
     <div className="flex h-full flex-col">
@@ -25,20 +35,41 @@ export function ChannelList() {
           <Button
             variant="ghost"
             size="icon"
+            aria-label={COPY.CHANNELS_DISCOVER}
+            onClick={openExplore}
+            className="hover:text-wa-text"
+          >
+            <Compass className="size-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label={COPY.CHANNELS_NEW}
             className="hover:text-wa-text"
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="size-5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="More"
-            className="hover:text-wa-text"
-          >
-            <MoreVertical className="size-5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="More"
+                className="hover:text-wa-text"
+              >
+                <MoreVertical className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={openExplore}>
+                <Compass className="mr-2 size-4" /> {COPY.CHANNELS_DISCOVER}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setCreateOpen(true)}>
+                <Plus className="mr-2 size-4" /> {COPY.CHANNELS_NEW}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

@@ -25,6 +25,7 @@ export function StatusViewersSheet({ statusId, open, onOpenChange }) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
+        showCloseButton
         className="max-h-[70vh] rounded-t-2xl border-wa-border bg-wa-panel text-wa-text"
       >
         <SheetHeader className="flex-row items-center gap-2 space-y-0 pb-2 text-left">

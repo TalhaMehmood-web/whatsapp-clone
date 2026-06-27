@@ -4,6 +4,13 @@ import { endpoints } from "@/config/endpoints";
 import { queryKeys } from "@/config/query-keys";
 import { useAuthStore } from "@/stores/auth-store";
 
+// Server-side debounced search (see C11 audit matrix). The cache key
+// includes the query string, so every typed query is its own entry.
+// We keep `staleTime` moderate (30s) so re-typing the same query
+// returns cached results without hitting the server, and we set
+// `gcTime` short so abandoned typo-y cache entries don't accumulate
+// — without this, every typed character would live in cache for the
+// default 5 minutes.
 export const useSearchUsersQuery = (query) => {
   const accessToken = useAuthStore((s) => s.accessToken);
   return useQuery({
@@ -14,6 +21,7 @@ export const useSearchUsersQuery = (query) => {
         .then((r) => r.data),
     enabled: !!accessToken && !!query && query.trim().length > 0,
     staleTime: 1000 * 30,
+    gcTime: 1000 * 60,
   });
 };
 

@@ -3,7 +3,9 @@ import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { authorizeSubscription } from "@/lib/realtime/server";
 import {
+  channelIdFromChannel,
   chatIdFromChannel,
+  isChannelChannel,
   isChatChannel,
   isPresenceChannel,
   isUserChannel,
@@ -52,6 +54,22 @@ export async function POST(req) {
       select: { id: true },
     });
     if (!member) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else if (isChannelChannel(channel)) {
+    // Channel broadcast room. Subscribers + the channel owner can listen.
+    const channelId = channelIdFromChannel(channel);
+    const [sub, ch] = await Promise.all([
+      prisma.channelSubscriber.findUnique({
+        where: { channelId_userId: { channelId, userId: user.id } },
+        select: { id: true },
+      }),
+      prisma.channel.findUnique({
+        where: { id: channelId },
+        select: { ownerId: true },
+      }),
+    ]);
+    if (!sub && ch?.ownerId !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   } else if (isPresenceChannel(channel)) {

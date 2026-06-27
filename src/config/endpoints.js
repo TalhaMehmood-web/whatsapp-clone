@@ -30,12 +30,19 @@ export const endpoints = {
     labels: (id) => `${BASE}/chats/${id}/labels`,
     media: (id) => `${BASE}/chats/${id}/media`,
     read: (id) => `${BASE}/chats/${id}/read`,
+    deliver: (id) => `${BASE}/chats/${id}/deliver`,
     unread: (id) => `${BASE}/chats/${id}/unread`,
     clear: (id) => `${BASE}/chats/${id}/clear`,
     lock: (id) => `${BASE}/chats/${id}/lock`,
     typing: (id) => `${BASE}/chats/${id}/typing`,
     locked: `${BASE}/chats/locked`,
     disappearing: (id) => `${BASE}/chats/${id}/disappearing`,
+    report: (id) => `${BASE}/chats/${id}/report`,
+    inviteHandle: (id) => `${BASE}/chats/${id}/invite-handle`,
+  },
+  groups: {
+    join: `${BASE}/groups/join`,
+    byInviteHandle: (handle) => `${BASE}/g/${handle}`,
   },
   messages: {
     detail: (id) => `${BASE}/messages/${id}`,
@@ -50,6 +57,7 @@ export const endpoints = {
   users: {
     list: `${BASE}/users`,
     me: `${BASE}/users/me`,
+    heartbeat: `${BASE}/users/me/heartbeat`,
     avatar: `${BASE}/users/me/avatar`,
     about: `${BASE}/users/me/about`,
     privacy: `${BASE}/users/me/privacy`,
@@ -74,10 +82,35 @@ export const endpoints = {
   communities: {
     list: `${BASE}/communities`,
     detail: (id) => `${BASE}/communities/${id}`,
+    members: (id) => `${BASE}/communities/${id}/members`,
+    member: (id, userId) => `${BASE}/communities/${id}/members/${userId}`,
+    leave: (id) => `${BASE}/communities/${id}/leave`,
+    subGroups: (id) => `${BASE}/communities/${id}/sub-groups`,
+    subGroup: (id, chatId) =>
+      `${BASE}/communities/${id}/sub-groups/${chatId}`,
+    byHandle: (handle) => `${BASE}/communities/by-handle/${handle}`,
+    join: `${BASE}/communities/join`,
+    report: (id) => `${BASE}/communities/${id}/report`,
   },
   channels: {
     list: `${BASE}/channels`,
+    explore: `${BASE}/channels/explore`,
     detail: (id) => `${BASE}/channels/${id}`,
+    subscribe: (id) => `${BASE}/channels/${id}/subscribe`,
+    mute: (id) => `${BASE}/channels/${id}/mute`,
+    posts: (id) => `${BASE}/channels/${id}/posts`,
+    post: (postId) => `${BASE}/channels/posts/${postId}`,
+    postReactions: (postId) =>
+      `${BASE}/channels/posts/${postId}/reactions`,
+    postReplies: (postId) =>
+      `${BASE}/channels/posts/${postId}/replies`,
+    byHandle: (handle) => `${BASE}/channels/by-handle/${handle}`,
+    admins: (id) => `${BASE}/channels/${id}/admins`,
+    admin: (id, userId) => `${BASE}/channels/${id}/admins/${userId}`,
+    transfer: (id) => `${BASE}/channels/${id}/transfer`,
+    privacy: (id) => `${BASE}/channels/${id}/privacy`,
+    report: (id) => `${BASE}/channels/${id}/report`,
+    subscribers: (id) => `${BASE}/channels/${id}/subscribers`,
   },
   labels: {
     list: `${BASE}/labels`,
@@ -91,6 +124,7 @@ export const endpoints = {
   search: {
     global: `${BASE}/search`,
     chat: (id) => `${BASE}/chats/${id}/search`,
+    messages: `${BASE}/search/messages`,
   },
   friendRequests: {
     list: `${BASE}/friend-requests`,

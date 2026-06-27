@@ -234,6 +234,16 @@ export const useClearPushSubscriptionMutation = () =>
 
 // ─── Block / Unblock ───────────────────────────────────────────────────────
 
+// Flip the `isBlocked` flag on a public-profile cache entry, if one
+// exists. Block/Unblock mutations call this so the /u/{handle} page
+// updates instantly without a refetch.
+function patchProfileBlocked(qc, handle, value) {
+  if (!handle) return;
+  qc.setQueryData(queryKeys.users.byHandle(handle.toLowerCase()), (old) =>
+    old ? { ...old, isBlocked: value } : old,
+  );
+}
+
 export const useBlockUserMutation = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -246,10 +256,14 @@ export const useBlockUserMutation = () => {
         peer,
         ...prev.filter((p) => p.id !== peer.id),
       ]);
-      return { prev };
+      patchProfileBlocked(qc, peer.handle, true);
+      return { prev, handle: peer.handle };
     },
-    onError: (_e, _v, ctx) =>
-      ctx && qc.setQueryData(queryKeys.users.blocked, ctx.prev),
+    onError: (_e, _v, ctx) => {
+      if (!ctx) return;
+      qc.setQueryData(queryKeys.users.blocked, ctx.prev);
+      patchProfileBlocked(qc, ctx.handle, false);
+    },
     // No invalidate-on-settle: the optimistic patch already encodes the
     // canonical state (a known peer object added to the list), and the
     // server response carries no new information to reconcile.
@@ -259,19 +273,34 @@ export const useBlockUserMutation = () => {
 export const useUnblockUserMutation = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (peerId) =>
-      api.delete(endpoints.users.block(peerId)).then(() => peerId),
-    onMutate: async (peerId) => {
+    // Accept either a string id (legacy callers) or a `peer` object so
+    // we can also flip the profile cache when the handle is known.
+    mutationFn: (peerOrId) => {
+      const id = typeof peerOrId === "string" ? peerOrId : peerOrId.id;
+      return api.delete(endpoints.users.block(id)).then(() => peerOrId);
+    },
+    onMutate: async (peerOrId) => {
+      const id = typeof peerOrId === "string" ? peerOrId : peerOrId.id;
+      const handle =
+        typeof peerOrId === "string" ? null : peerOrId.handle ?? null;
       await qc.cancelQueries({ queryKey: queryKeys.users.blocked });
       const prev = qc.getQueryData(queryKeys.users.blocked) ?? [];
+      // If the call came in by id, see if we already know the handle
+      // from the blocked-list cache so we can still patch the profile.
+      const cachedHandle =
+        handle ?? prev.find((p) => p.id === id)?.handle ?? null;
       qc.setQueryData(
         queryKeys.users.blocked,
-        prev.filter((p) => p.id !== peerId),
+        prev.filter((p) => p.id !== id),
       );
-      return { prev };
+      patchProfileBlocked(qc, cachedHandle, false);
+      return { prev, handle: cachedHandle };
     },
-    onError: (_e, _v, ctx) =>
-      ctx && qc.setQueryData(queryKeys.users.blocked, ctx.prev),
+    onError: (_e, _v, ctx) => {
+      if (!ctx) return;
+      qc.setQueryData(queryKeys.users.blocked, ctx.prev);
+      patchProfileBlocked(qc, ctx.handle, true);
+    },
     // Same rationale as useBlockUserMutation — the optimistic filter is
     // canonical, no need to re-fetch the list on success.
   });

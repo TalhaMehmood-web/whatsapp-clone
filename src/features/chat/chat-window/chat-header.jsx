@@ -69,7 +69,6 @@ import { CallType } from "@/models/enums";
 import { COPY, ROUTES } from "@/config/constants";
 import { GroupInfoSheet } from "@/features/chat/group-info/group-info-sheet";
 import { ContactInfoSheet } from "@/features/chat/contact-info/contact-info-sheet";
-import { ChatMediaBrowser } from "@/features/chat/chat-media-browser/chat-media-browser";
 import { LockChatDialog } from "@/features/chat/locked-chats/lock-chat-dialog";
 import { DisappearingMessagesDialog } from "./disappearing-messages-dialog";
 import { NewCallLinkDialog } from "@/features/calls/call-link-dialog/new-call-link-dialog";
@@ -79,7 +78,6 @@ export function ChatHeader({ chatId }) {
   const { user } = useAuth();
   const typingSet = useChatTyping(chatId);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [mediaOpen, setMediaOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [disappearingOpen, setDisappearingOpen] = useState(false);
@@ -381,7 +379,9 @@ export function ChatHeader({ chatId }) {
               triggerLabel={COPY.CHAT_ITEM_ADD_TO_LIST}
             />
 
-            <DropdownMenuItem onClick={() => setMediaOpen(true)}>
+            <DropdownMenuItem
+              onClick={() => router.push(ROUTES.CHAT_MEDIA(chatId))}
+            >
               <Images className="mr-2 size-4" /> {COPY.COMMUNITIES_MEDIA_TITLE}
             </DropdownMenuItem>
 
@@ -457,12 +457,6 @@ export function ChatHeader({ chatId }) {
           onOpenChange={setContactOpen}
         />
       )}
-      <ChatMediaBrowser
-        chatId={chatId}
-        open={mediaOpen}
-        onOpenChange={setMediaOpen}
-      />
-
       <LockChatDialog
         chatId={chatId}
         open={lockOpen}

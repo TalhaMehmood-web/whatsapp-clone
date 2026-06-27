@@ -28,6 +28,11 @@ export const useMessagesQuery = (chatId) =>
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: !!chatId && !!useAuthStore.getState().accessToken,
     staleTime: Infinity,
+    // gcTime: Infinity is what makes the IndexedDB-persisted message
+    // history actually load from disk on every revisit — the default
+    // gcTime: 5min would evict the entry before persistence could
+    // rehydrate it. WhatsApp Web's local SQLite mirror behaviour.
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   });

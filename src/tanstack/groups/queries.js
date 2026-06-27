@@ -18,7 +18,23 @@ export const useGroupMembersQuery = (chatId) => {
       api.get(endpoints.chats.members(chatId)).then((r) => r.data),
     enabled: !!chatId && !!accessToken,
     staleTime: Infinity,
+    // gcTime: Infinity so group-members surface (info sheet, member
+    // mentions, etc.) warm-starts from IndexedDB on reload.
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   });
 };
+
+// Public peek for the /g/{handle} invite landing page. Works without
+// auth (the route handler is public). Short staleTime because the
+// member count + name should look fresh when the visitor lands.
+export const useGroupByInviteHandleQuery = (handle) =>
+  useQuery({
+    queryKey: queryKeys.groups.byInviteHandle(handle),
+    queryFn: () =>
+      api.get(endpoints.groups.byInviteHandle(handle)).then((r) => r.data),
+    enabled: !!handle,
+    staleTime: 30_000,
+    retry: false,
+  });

@@ -48,8 +48,14 @@ export const useUiStore = create((set, get) => ({
   // open these without the header being mounted (e.g. on /settings).
   newChatOpen: false,
   newGroupOpen: false,
-  openNewChat: () => set({ newChatOpen: true, newGroupOpen: false }),
-  closeNewChat: () => set({ newChatOpen: false }),
+  // `newChatIntent` is forwarded to the picked chat as a `?attach=…`
+  // query param so the chat composer can auto-open the right file
+  // picker (used by the empty-pane "Send document" pill). Null = the
+  // default "just open the chat" behaviour.
+  newChatIntent: null,
+  openNewChat: ({ intent = null } = {}) =>
+    set({ newChatOpen: true, newGroupOpen: false, newChatIntent: intent }),
+  closeNewChat: () => set({ newChatOpen: false, newChatIntent: null }),
   openNewGroup: () => set({ newGroupOpen: true, newChatOpen: false }),
   closeNewGroup: () => set({ newGroupOpen: false }),
 

@@ -153,7 +153,14 @@ export async function leaveGroup({ chatId, userId }) {
   }
 }
 
-export async function updateGroupMeta({ chatId, actorId, name, photo, description }) {
+export async function updateGroupMeta({
+  chatId,
+  actorId,
+  name,
+  photo,
+  description,
+  isAnnouncement,
+}) {
   await assertCanManage(chatId, actorId);
   return prisma.chat.update({
     where: { id: chatId },
@@ -161,6 +168,13 @@ export async function updateGroupMeta({ chatId, actorId, name, photo, descriptio
       ...(name !== undefined ? { name: name.trim() } : {}),
       ...(photo !== undefined ? { photo } : {}),
       ...(description !== undefined ? { description } : {}),
+      // Admin-only flag (GR1). When ON, only OWNER/ADMIN chat members
+      // can send messages — the server check is in createMessage().
+      // Community announcement chats set this at creation time; here
+      // it's also flippable for any standalone group.
+      ...(isAnnouncement !== undefined
+        ? { isAnnouncement: Boolean(isAnnouncement) }
+        : {}),
     },
   });
 }

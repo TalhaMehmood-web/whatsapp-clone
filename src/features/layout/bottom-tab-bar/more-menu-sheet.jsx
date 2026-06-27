@@ -120,6 +120,7 @@ export function MoreMenuSheet() {
       </SheetTrigger>
       <SheetContent
         side="bottom"
+        showCloseButton
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden rounded-t-2xl border-wa-border bg-wa-panel p-0 text-wa-text"
       >
         <SheetHeader className="border-b border-wa-border px-4 py-3 text-left">

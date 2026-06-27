@@ -15,13 +15,29 @@ import { cn } from "@/utils/cn";
 // `badge`:
 //   - truthy boolean → small green dot in the corner (unread indicator).
 //   - number > 0    → green count pill (friend-request count, etc.).
-export function NavRailItem({ href, label, icon: Icon, active, badge, onClick }) {
+export function NavRailItem({
+  href,
+  label,
+  icon: Icon,
+  active,
+  badge,
+  onClick,
+}) {
   const numericBadge = typeof badge === "number" && badge > 0;
   const dotBadge = !numericBadge && !!badge;
 
   const inner = (
     <>
-      <Icon className="size-6" />
+      {/* lucide icons are stroke-only by default. On active we paint
+          the fill in currentColor (so the icon adopts the active text
+          tone) and thin the stroke — the combo gives the "filled"
+          weight WhatsApp Web uses for the selected tab. */}
+      <Icon
+        className={cn(
+          "size-6 transition-colors",
+          active && "fill-current [&_path]:stroke-[1.5]",
+        )}
+      />
       {dotBadge && (
         <span className="absolute right-2 top-2 size-2 rounded-full bg-wa-green" />
       )}

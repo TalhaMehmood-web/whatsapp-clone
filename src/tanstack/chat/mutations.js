@@ -175,10 +175,9 @@ export const useClearChatMutation = () => {
         qc.setQueryData(queryKeys.messages.list(chatId), ctx.prev);
       }
     },
-    onSettled: (_d, _e, chatId) => {
-      qc.invalidateQueries({ queryKey: queryKeys.messages.list(chatId) });
-      qc.invalidateQueries({ queryKey: queryKeys.chats.all });
-    },
+    // No invalidate-on-settled. The optimistic empty-pages state matches
+    // the server result; an invalidate would just refetch the same empty
+    // result and tear up the IndexedDB-persisted cache for no reason.
   });
 };
 

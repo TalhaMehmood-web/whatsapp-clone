@@ -1,13 +1,38 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { FileText, Sparkles, UserPlus, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { COPY } from "@/config/constants";
+import { useUiStore } from "@/stores/ui-store";
+import { COPY, ROUTES } from "@/config/constants";
 
 // The right-pane placeholder shown when no chat / status / community is open.
 // Mirrors WhatsApp Web's "Download WhatsApp for Windows" promo card with the
 // three pill actions docked at the bottom of the pane.
 export function EmptyDetailPane() {
+  const router = useRouter();
+  const openNewChat = useUiStore((s) => s.openNewChat);
+
+  // Send document → open the friend-picker with an intent. After the
+  // user picks a chat the modal navigates to it with ?attach=document,
+  // which the chat's AttachMenu reads and uses to auto-open the OS
+  // file picker filtered to docs. Two clicks instead of one, but no
+  // dedicated "pick-and-send" sheet to build.
+  const onSendDocument = () => openNewChat({ intent: "document" });
+
+  // Add contact → /search is the global user-search page where the
+  // user can search by name/handle/email/phone and send a friend
+  // request. That's the closest semantic in this app (we don't have a
+  // device-contacts API to import from).
+  const onAddContact = () => router.push(ROUTES.SEARCH_PAGE);
+
+  // Ask Meta AI — we don't ship an LLM with this app. Keep the
+  // affordance for visual parity with WhatsApp Web but be honest about
+  // it instead of routing to a half-built screen.
+  const onAskAi = () =>
+    toast.info("AI assistant isn't part of this build.");
+
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center bg-wa-bg px-6">
       <div className="flex max-w-md flex-col items-center rounded-2xl bg-wa-panel px-10 py-12 text-center shadow-lg">
@@ -24,9 +49,9 @@ export function EmptyDetailPane() {
       </div>
 
       <div className="mt-10 flex items-center gap-3">
-        <PillAction icon={FileText} label={COPY.EMPTY_PILL_DOC} />
-        <PillAction icon={UserPlus} label={COPY.EMPTY_PILL_CONTACT} />
-        <PillAction icon={Sparkles} label={COPY.EMPTY_PILL_AI} />
+        <PillAction icon={FileText} label={COPY.EMPTY_PILL_DOC} onClick={onSendDocument} />
+        <PillAction icon={UserPlus} label={COPY.EMPTY_PILL_CONTACT} onClick={onAddContact} />
+        <PillAction icon={Sparkles} label={COPY.EMPTY_PILL_AI} onClick={onAskAi} />
       </div>
 
       <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-wa-text-muted/70">
@@ -37,10 +62,11 @@ export function EmptyDetailPane() {
   );
 }
 
-function PillAction({ icon: Icon, label }) {
+function PillAction({ icon: Icon, label, onClick }) {
   return (
     <Button
       variant="ghost"
+      onClick={onClick}
       className="flex h-auto flex-col items-center gap-2 rounded-2xl bg-wa-panel-2 px-6 py-4 text-xs text-wa-text hover:bg-wa-panel-3"
     >
       <Icon className="size-5 text-wa-text-muted" />

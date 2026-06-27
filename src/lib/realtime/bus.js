@@ -20,6 +20,7 @@
 
 import {
   bindConnectionState,
+  channelChannel,
   chatChannel,
   presenceChannel,
   subscribe,
@@ -130,6 +131,19 @@ export function createBus(handle, { selfUserId }) {
     leaveChat(chatId) {
       if (!chatId) return;
       leaveChannel(chatChannel(chatId));
+    },
+
+    // Channel broadcast room. Joined when a subscriber opens the
+    // channel detail page; left on navigate so a user browsing many
+    // channels doesn't accumulate idle subscriptions.
+    joinChannelRoom(channelId) {
+      if (!channelId) return;
+      joinChannel(channelChannel(channelId));
+    },
+
+    leaveChannelRoom(channelId) {
+      if (!channelId) return;
+      leaveChannel(channelChannel(channelId));
     },
 
     bindPresence(handlers) {

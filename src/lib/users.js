@@ -7,6 +7,7 @@ import {
   verifyRefreshToken,
 } from "./auth";
 import { relationshipWith } from "./friend-requests.js";
+import { applyDerivedPresence } from "./presence.js";
 
 const PUBLIC_USER_SELECT = {
   id: true,
@@ -154,10 +155,59 @@ export async function getPublicProfile({ viewerId, handle }) {
     select: PUBLIC_USER_SELECT,
   });
   if (!profile) return null;
+
+  // Derive presence from lastSeen recency — see lib/presence.js for
+  // why the raw DB `isOnline` column can't be trusted. Same helper is
+  // used in chat detail + chat list so every surface agrees.
+  const wasMarkedOnline = profile.isOnline;
+  applyDerivedPresence(profile);
+  if (wasMarkedOnline && !profile.isOnline) {
+    // Lazy cleanup so abandoned sessions don't keep reporting online
+    // state to anyone else. Fire and forget — a failed write is fine.
+    prisma.user
+      .update({ where: { id: profile.id }, data: { isOnline: false } })
+      .catch(() => {});
+  }
+
   const relationship = viewerId
     ? await relationshipWith(viewerId, profile.id)
     : "NONE";
-  return { ...profile, relationship };
+
+  // Viewer-only extras: whether the viewer has blocked this user, and a
+  // count of chats they share. Skipped for unauthenticated visitors so
+  // the public landing isn't a personalised endpoint. Both queries run
+  // in parallel and only when the viewer is logged in and not viewing
+  // themselves.
+  let isBlocked = false;
+  let mutualChatCount = 0;
+  if (viewerId && viewerId !== profile.id) {
+    const [block, sharedChats] = await Promise.all([
+      prisma.block.findUnique({
+        where: {
+          blockerId_blockedId: {
+            blockerId: viewerId,
+            blockedId: profile.id,
+          },
+        },
+        select: { id: true },
+      }),
+      // A chat both users are members of (groups + 1:1). The 1:1 chat
+      // between them counts as 1 — that matches WhatsApp's "1 chat
+      // together" badge on first-time conversations.
+      prisma.chat.count({
+        where: {
+          AND: [
+            { members: { some: { userId: viewerId } } },
+            { members: { some: { userId: profile.id } } },
+          ],
+        },
+      }),
+    ]);
+    isBlocked = !!block;
+    mutualChatCount = sharedChats;
+  }
+
+  return { ...profile, relationship, isBlocked, mutualChatCount };
 }
 
 // Search users by name / email / phone. Always excludes the current user and

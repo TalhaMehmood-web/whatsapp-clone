@@ -50,7 +50,15 @@ model User {
   notifPrefs           NotificationPreferences?
   labels               Label[]
   communityMemberships CommunityMember[]
+  communityReports     CommunityReport[]
+  chatReports          ChatReport[]
   channelSubs          ChannelSubscriber[]
+  channelsOwned        Channel[]            @relation("ChannelOwner")
+  channelAdminships    ChannelAdmin[]
+  channelReports       ChannelReport[]
+  channelPosts         ChannelPost[]        @relation("ChannelPostAuthor")
+  channelPostReplies   ChannelPostReply[]   @relation("ChannelPostReplyAuthor")
+  channelPostReactions ChannelPostReaction[]
   friendRequestsSent     FriendRequest[]    @relation("FriendRequestSender")
   friendRequestsReceived FriendRequest[]    @relation("FriendRequestReceiver")
   notifications          Notification[]
@@ -129,6 +137,18 @@ model Chat {
   photo               String?
   description         String?
   communityId         String?
+  // Optional shareable invite slug for groups (GR2). Same shape as
+  // User.handle / Community.handle: lowercase alphanum + dot/underscore,
+  // 3-30 chars, unique across all groups. Null until an admin enables
+  // the invite link from the group-info sheet. Public visitors can peek
+  // at /g/{handle}; joining requires auth.
+  inviteHandle        String?  @unique
+  // Announcement group flag. Only OWNER + ADMIN can send messages when
+  // true. Set on the chat that the community-create flow auto-spins up
+  // ("Announcements"); admins can flip it on any community sub-group
+  // from the group-info sheet (a future feature; the column is here so
+  // we don't need a second migration when that lands).
+  isAnnouncement      Boolean  @default(false)
   // Disappearing messages TTL in seconds. Null = off. Applied to outgoing
   // messages by stamping Message.expiresAt = now() + this many seconds.
   disappearingSeconds Int?
@@ -139,6 +159,7 @@ model Chat {
   members   ChatMember[]
   messages  Message[]
   pins      PinnedMessage[]
+  reports   ChatReport[]
 }
 
 // Each row is one pinned message in a chat. Matches WhatsApp Web's
@@ -156,6 +177,22 @@ model PinnedMessage {
 
   @@unique([chatId, messageId])
   @@index([chatId, pinnedAt])
+}
+
+// Abuse report on a group chat. Idempotent per (user, chat); same shape
+// as ChannelReport + CommunityReport — kept parallel deliberately.
+// Only used for groups today; 1:1 reports route through the per-user
+// block flow instead.
+model ChatReport {
+  id        String   @id @default(cuid())
+  chatId    String
+  userId    String
+  reason    String?
+  createdAt DateTime @default(now())
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
 }
 
 model ChatMember {
@@ -347,12 +384,17 @@ model StatusView {
 model Community {
   id          String   @id @default(cuid())
   name        String
+  // Unique URL slug for shareable invite links: /c/{handle}. Lowercase
+  // alphanum + dot/underscore, enforced at the lib level the same way
+  // User.handle is. Null on legacy rows until they pick one.
+  handle      String?  @unique
   photo       String?
   description String?
   createdAt   DateTime @default(now())
 
   chats   Chat[]
   members CommunityMember[]
+  reports CommunityReport[]
 }
 
 model CommunityMember {
@@ -367,15 +409,80 @@ model CommunityMember {
   @@unique([communityId, userId])
 }
 
+// Abuse report on a whole community. Idempotent per (user, community)
+// so a non-member who finds the invite link can report only once. Same
+// shape as ChannelReport — kept parallel deliberately.
+model CommunityReport {
+  id          String    @id @default(cuid())
+  communityId String
+  userId      String
+  reason      String?
+  createdAt   DateTime  @default(now())
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+}
+
 model Channel {
   id          String   @id @default(cuid())
   name        String
   handle      String   @unique
   photo       String?
   description String?
+  // Single owner — channel-level admins are listed on the ChannelAdmin
+  // join table. Owner has every admin permission plus delete/transfer.
+  // Transferable via /api/channels/[id]/transfer.
+  ownerId     String?
+  // Private channels are reachable by direct invite link only; they're
+  // filtered out of `exploreChannels`. Public channels show up in
+  // trending + search.
+  isPrivate   Boolean  @default(false)
+  // Denormalised counter so the post route can enforce the 500-cap
+  // without a count() per request. Maintained atomically in the
+  // subscribe / unsubscribe lib helpers.
+  subscriberCount Int  @default(0)
   createdAt   DateTime @default(now())
 
+  owner       User?              @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  admins      ChannelAdmin[]
+  reports     ChannelReport[]
   subscribers ChannelSubscriber[]
+  posts       ChannelPost[]
+  digests     ChannelDigest[]
+}
+
+// Co-admins of a channel. Owner is implicit (lives on Channel.ownerId)
+// and is NOT duplicated here. Capped at 5 admins per channel via the
+// lib helper. Admins can post + delete posts + edit channel metadata,
+// but cannot transfer ownership, delete the channel, or change
+// public/private.
+model ChannelAdmin {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  addedAt   DateTime @default(now())
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+}
+
+// Abuse report on a whole channel. Idempotent per (user, channel) so
+// the report button can be tapped repeatedly without flooding the
+// table. We don't enforce moderator review yet — the row simply exists
+// for a future moderation dashboard.
+model ChannelReport {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  reason    String?
+  createdAt DateTime @default(now())
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
 }
 
 model ChannelSubscriber {
@@ -388,6 +495,79 @@ model ChannelSubscriber {
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, userId])
+}
+
+// A single broadcast post inside a Channel. Owners author; subscribers
+// read. Media follows the same Cloudinary pattern as Message — publicId
+// + resource for the cleanup cron to destroy on delete/expire.
+model ChannelPost {
+  id            String   @id @default(cuid())
+  channelId     String
+  authorId      String
+  content       String?
+  mediaUrl      String?
+  mediaMime     String?
+  mediaThumbUrl String?
+  mediaSizeBytes Int?
+  mediaDuration Int?
+  fileName      String?
+  mediaPublicId String?
+  mediaResource String?
+  type          MessageType @default(TEXT)
+  editedAt      DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  channel   Channel               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User                  @relation("ChannelPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  reactions ChannelPostReaction[]
+  replies   ChannelPostReply[]
+
+  @@index([channelId, createdAt])
+}
+
+model ChannelPostReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  post ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
+}
+
+// One thread per post. Replies only fan out to (a) the thread author,
+// (b) anyone who has already replied, (c) the post author — never to
+// the whole channel. Keeps Pusher event count bounded.
+model ChannelPostReply {
+  id        String   @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  post   ChannelPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User        @relation("ChannelPostReplyAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+// One row per (channel, weekStart). Populated by the daily cron when
+// the AI digest feature ships. Empty today — schema is here so the
+// migration lands in this batch instead of a follow-up.
+model ChannelDigest {
+  id        String   @id @default(cuid())
+  channelId String
+  weekStart DateTime
+  summary   String   @db.Text
+  createdAt DateTime @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, weekStart])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

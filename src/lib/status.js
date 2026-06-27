@@ -1,7 +1,9 @@
 import { prisma } from "./prisma.js";
 import { listFriends } from "./friend-requests.js";
 import { destroyMedia } from "./upload.js";
+import { triggerToUser } from "./realtime/server.js";
 import { StatusType } from "@/models/enums";
+import { SOCKET_EVENT } from "@/config/constants";
 
 const STATUS_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -109,7 +111,7 @@ export async function createStatus({
     err.status = 400;
     throw err;
   }
-  return prisma.status.create({
+  const status = await prisma.status.create({
     data: {
       userId,
       type,
@@ -125,6 +127,34 @@ export async function createStatus({
       expiresAt: new Date(Date.now() + STATUS_TTL_MS),
     },
   });
+
+  // Fan out to every friend's private channel so their status list
+  // picks up the new ring without a manual refresh. Best-effort: the
+  // status is already persisted; a Pusher hiccup just means the
+  // recipient sees it on next refetch. We don't await the broadcasts
+  // (await Promise.all would block the route on N HTTP calls — the
+  // sender's response is what matters).
+  fanoutStatusToFriends(userId, SOCKET_EVENT.STATUS_NEW, {
+    statusId: status.id,
+    authorId: userId,
+  });
+
+  return status;
+}
+
+// Sends an event to every accepted friend of `userId`. Used for both
+// STATUS_NEW + STATUS_DELETED. Best-effort: never await this in a
+// request path — let Pusher run in the background.
+async function fanoutStatusToFriends(userId, event, payload) {
+  try {
+    const friends = await listFriends(userId);
+    await Promise.all(
+      friends.map((f) => triggerToUser(f.id, event, payload).catch(() => {})),
+    );
+  } catch {
+    // listFriends is cheap; if it does throw, there's nothing useful to
+    // surface — the status itself is already saved/deleted.
+  }
 }
 
 export async function viewStatus({ userId, statusId }) {
@@ -188,6 +218,13 @@ export async function deleteStatus({ userId, statusId }) {
       resourceType: s.mediaResource ?? "image",
     });
   }
+  // Notify friends so their cached feed drops this status. They might
+  // have already viewed it (no-op) or be sitting on a stale ring count
+  // (this fixes it). Best-effort fanout.
+  fanoutStatusToFriends(userId, SOCKET_EVENT.STATUS_DELETED, {
+    statusId,
+    authorId: userId,
+  });
 }
 
 // Hard-deletes every Status row whose expiresAt is in the past AND

@@ -82,10 +82,11 @@ export const useSendMessageMutation = (chatId) => {
       }
     },
 
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.messages.list(chatId) });
-      qc.invalidateQueries({ queryKey: queryKeys.chats.all });
-    },
+    // No invalidate-on-settled. The realtime MESSAGE_NEW event from
+    // Pusher inserts the canonical server row into the cache and
+    // dedupes against the optimistic temp row (see use-chat-socket-sync
+    // `onNew`). Invalidating here would defeat IndexedDB persistence
+    // by forcing a full chat reload after every send.
   });
 };
 

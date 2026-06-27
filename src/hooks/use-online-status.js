@@ -58,6 +58,22 @@ export function useOnlineStatusSync() {
           }
         },
       );
+
+      // Also patch any cached public-profile entries (`users.byHandle`)
+      // for this user. The cache is keyed by handle, not id, so we scan
+      // every entry and match by id. Without this, the /u/{handle} page
+      // reads the stale DB `isOnline` from the initial fetch and can
+      // show online for a user who has actually closed their tab.
+      qc.getQueriesData({ queryKey: queryKeys.users.all }).forEach(
+        ([key, data]) => {
+          if (!data || data.id !== userId) return;
+          qc.setQueryData(key, {
+            ...data,
+            isOnline,
+            lastSeen: lastSeen ?? data.lastSeen,
+          });
+        },
+      );
     };
 
     const unbind = socket.bindPresence({

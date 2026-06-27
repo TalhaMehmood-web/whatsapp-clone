@@ -35,17 +35,18 @@ export function NewCommunityModal({ open, onOpenChange }) {
 
   const form = useForm({
     resolver: zodResolver(newCommunitySchema),
-    defaultValues: { name: "", description: "" },
+    defaultValues: { name: "", handle: "", description: "" },
   });
 
   useEffect(() => {
-    if (!open) form.reset({ name: "", description: "" });
+    if (!open) form.reset({ name: "", handle: "", description: "" });
   }, [open, form]);
 
   const onSubmit = (values) =>
     create.mutate(
       {
         name: values.name,
+        handle: values.handle?.trim() || undefined,
         description: values.description?.trim() || undefined,
       },
       {
@@ -83,6 +84,26 @@ export function NewCommunityModal({ open, onOpenChange }) {
                         {...field}
                       />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="handle"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{COPY.COMMUNITIES_HANDLE_LABEL}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={COPY.COMMUNITIES_HANDLE_PLACEHOLDER}
+                        autoComplete="off"
+                        {...field}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-wa-text-muted">
+                      {COPY.COMMUNITIES_HANDLE_HINT}
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

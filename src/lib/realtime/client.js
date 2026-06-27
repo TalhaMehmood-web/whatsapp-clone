@@ -53,6 +53,7 @@ export function bindConnectionState(handle, onChange) {
 
 // Re-export the channel namers so hooks have a single import target.
 export {
+  channelChannel,
   chatChannel,
   userChannel,
   presenceChannel,

@@ -46,6 +46,17 @@ export async function triggerToUser(userId, event, payload) {
   await trigger(userChannel(userId), event, payload);
 }
 
+// Raw trigger when the caller already has the fully-qualified channel
+// name (e.g. `private-channel-abc123`). Used by lib/channels.js where
+// the channel namespace is computed once and reused for multiple
+// triggers. Avoids passing the chatId/userId pair through layers when
+// a name is more natural.
+export async function triggerToChannel(channelName, event, payload) {
+  if (!channelName) return;
+  const { trigger } = getServerAdapter();
+  await trigger(channelName, event, payload);
+}
+
 export function authorizeSubscription(args) {
   const { authorize } = getServerAdapter();
   return authorize(args);

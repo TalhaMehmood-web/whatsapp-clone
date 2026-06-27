@@ -3,14 +3,7 @@
 import { Download, ExternalLink, Loader2, Play } from "lucide-react";
 import { format } from "date-fns";
 
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatMediaQuery } from "@/tanstack/chat/queries";
 import { useUiStore } from "@/stores/ui-store";
 import { COPY } from "@/config/constants";
@@ -20,13 +13,17 @@ import { documentIcon } from "@/utils/document-icon";
 import { downloadCloudinaryUrl } from "@/utils/cloudinary-url";
 import { cn } from "@/utils/cn";
 
-// Per-chat browser of every shared image, video, document and link.
-// Opens as a right-side sheet (matches WhatsApp Web's "Media, links, and
-// docs" panel). Clicking a media tile reuses the MediaLightbox carousel.
-export function ChatMediaBrowser({ chatId, open, onOpenChange }) {
+// Media / Docs / Links tabs for a single chat. Pulled out of the
+// (deleted) ChatMediaBrowser sheet so the same content can render inside
+// a full-screen route layout (/chat/[id]/media). The route handles its
+// own header — this component is just the scrollable tabbed body.
+//
+// `enabled` lets a caller defer the query until the surface is actually
+// on-screen (mobile route transitions, lazy loading, etc.).
+export function ChatMediaTabs({ chatId, enabled = true }) {
   const openLightbox = useUiStore((s) => s.openLightbox);
   const openDocPreview = useUiStore((s) => s.openDocPreview);
-  const { data, isLoading } = useChatMediaQuery(chatId, { enabled: open });
+  const { data, isLoading } = useChatMediaQuery(chatId, { enabled });
 
   const media = data?.media ?? [];
   const docs = data?.docs ?? [];
@@ -39,50 +36,40 @@ export function ChatMediaBrowser({ chatId, open, onOpenChange }) {
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className="flex w-full flex-col gap-0 border-wa-border bg-wa-panel p-0 text-wa-text sm:max-w-md"
-      >
-        <SheetHeader className="border-b border-wa-border px-4 py-3 text-left">
-          <SheetTitle className="text-base font-medium text-wa-text">
-            {COPY.COMMUNITIES_MEDIA_TITLE}
-          </SheetTitle>
-        </SheetHeader>
+    <Tabs
+      defaultValue="media"
+      className="flex h-full min-h-0 flex-col"
+    >
+      {/* Sticky tabs so the user always has the section switcher
+          available while scrolling a long list. */}
+      <div className="sticky top-0 z-10 border-b border-wa-border bg-wa-panel px-2 pt-2">
+        <TabsList className="grid w-full grid-cols-3 bg-transparent">
+          <TabsTrigger value="media">{COPY.COMMUNITIES_TAB_MEDIA}</TabsTrigger>
+          <TabsTrigger value="docs">{COPY.COMMUNITIES_TAB_DOCS}</TabsTrigger>
+          <TabsTrigger value="links">{COPY.COMMUNITIES_TAB_LINKS}</TabsTrigger>
+        </TabsList>
+      </div>
 
-        <Tabs defaultValue="media" className="flex min-h-0 flex-1 flex-col px-2">
-          <TabsList className="mt-2 grid w-full grid-cols-3 bg-transparent">
-            <TabsTrigger value="media">
-              {COPY.COMMUNITIES_TAB_MEDIA}
-            </TabsTrigger>
-            <TabsTrigger value="docs">{COPY.COMMUNITIES_TAB_DOCS}</TabsTrigger>
-            <TabsTrigger value="links">
-              {COPY.COMMUNITIES_TAB_LINKS}
-            </TabsTrigger>
-          </TabsList>
-
-          <ScrollArea className="min-h-0 flex-1">
-            {isLoading ? (
-              <div className="flex justify-center py-10 text-wa-text-muted">
-                <Loader2 className="size-5 animate-spin" />
-              </div>
-            ) : (
-              <>
-                <TabsContent value="media" className="mt-0 px-1 pb-6 pt-2">
-                  <MediaGrid items={media} onOpen={openMediaAt} />
-                </TabsContent>
-                <TabsContent value="docs" className="mt-0 px-1 pb-6 pt-2">
-                  <DocsList items={docs} onOpen={openDocPreview} />
-                </TabsContent>
-                <TabsContent value="links" className="mt-0 px-1 pb-6 pt-2">
-                  <LinksList items={links} />
-                </TabsContent>
-              </>
-            )}
-          </ScrollArea>
-        </Tabs>
-      </SheetContent>
-    </Sheet>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {isLoading ? (
+          <div className="flex justify-center py-10 text-wa-text-muted">
+            <Loader2 className="size-5 animate-spin" />
+          </div>
+        ) : (
+          <>
+            <TabsContent value="media" className="mt-0 px-2 pb-6 pt-3">
+              <MediaGrid items={media} onOpen={openMediaAt} />
+            </TabsContent>
+            <TabsContent value="docs" className="mt-0 px-2 pb-6 pt-3">
+              <DocsList items={docs} onOpen={openDocPreview} />
+            </TabsContent>
+            <TabsContent value="links" className="mt-0 px-2 pb-6 pt-3">
+              <LinksList items={links} />
+            </TabsContent>
+          </>
+        )}
+      </div>
+    </Tabs>
   );
 }
 
@@ -93,10 +80,12 @@ function MediaGrid({ items, onOpen }) {
     <div className="flex flex-col gap-4">
       {groups.map((group) => (
         <section key={group.label}>
-          <h3 className="px-3 pb-2 text-[11px] uppercase tracking-wider text-wa-text-muted">
+          <h3 className="px-1 pb-2 text-[11px] uppercase tracking-wider text-wa-text-muted">
             {group.label}
           </h3>
-          <div className="grid grid-cols-3 gap-1">
+          {/* 3 columns on phones, 4 on small tablets, 5 on desktops so
+              tiles never get cartoonishly large on a wide page. */}
+          <div className="grid grid-cols-3 gap-1 sm:grid-cols-4 lg:grid-cols-5">
             {group.items.map((m) => (
               <button
                 key={m.id}
@@ -121,6 +110,7 @@ function MediaGrid({ items, onOpen }) {
                   <img
                     src={m.mediaUrl}
                     alt={m.caption ?? ""}
+                    loading="lazy"
                     className="size-full object-cover"
                   />
                 )}
@@ -212,8 +202,6 @@ function EmptyState({ label }) {
   );
 }
 
-// Group an array of items into "Today" / "Yesterday" / formatted-date
-// buckets, preserving the original order.
 function groupByDate(items) {
   const out = new Map();
   const today = startOfDay(new Date());

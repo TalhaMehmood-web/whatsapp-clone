@@ -5,10 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import api from "@/config/axios-instance";
 import { useSocketStore } from "@/stores/socket-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { queryKeys } from "@/config/query-keys";
 import { COPY, ROUTES, SOCKET_EVENT } from "@/config/constants";
+import { endpoints } from "@/config/endpoints";
 import { ReceiptStatus } from "@/models/enums";
 import { previewText } from "@/utils/message-format";
 
@@ -28,6 +30,20 @@ export function useChatSocketSync() {
     // room and every member's user room, so a peer who has the chat open
     // receives the event twice. Track ids we've already processed.
     const seenMessageIds = new Set();
+
+    // Per-chat throttle for the delivery ACK. We fire one POST per chat
+    // per short window — back-to-back messages share a single ACK that
+    // flips every SENT receipt to DELIVERED on the server. Keeps the
+    // network chatter bounded while still moving the sender's tick to
+    // double-grey within a beat of the message arriving.
+    const ackedChats = new Map(); // chatId → timeout id
+
+    // Same shape but for the read ACK fired when a message arrives in
+    // the chat the user is currently viewing. Without this, ticks stayed
+    // single-grey for instant-reply scenarios — markChatRead only ran
+    // once on chat open, so messages arriving AFTER that point were
+    // never marked read until the next navigation.
+    const readAckedChats = new Map(); // chatId → timeout id
 
     const onNew = (message) => {
       if (!message?.id) return;
@@ -123,7 +139,37 @@ export function useChatSocketSync() {
         qc.invalidateQueries({ queryKey: queryKeys.chats.all });
       }
 
-      // 3) In-app toast banner (WhatsApp Desktop behaviour). Skip when the
+      // 3) Receipt ACK. If we're the sender, skip entirely. Otherwise:
+      //    - If the chat is currently focused → mark it READ so the
+      //      sender sees a double-blue tick within a beat of sending.
+      //      The initial markChatRead on chat-open only covers messages
+      //      that existed at open time; new arrivals need their own ack.
+      //    - If the chat isn't focused → mark messages DELIVERED so the
+      //      sender's tick at least flips to double-grey.
+      //    Both branches coalesce bursts via a short per-chat timer.
+      if (!isSelf) {
+        if (isViewingChat) {
+          if (!readAckedChats.has(message.chatId)) {
+            const t = setTimeout(() => {
+              readAckedChats.delete(message.chatId);
+              api
+                .post(endpoints.chats.read(message.chatId))
+                .catch(() => {});
+            }, 150);
+            readAckedChats.set(message.chatId, t);
+          }
+        } else if (!ackedChats.has(message.chatId)) {
+          const t = setTimeout(() => {
+            ackedChats.delete(message.chatId);
+            api
+              .post(endpoints.chats.deliver(message.chatId))
+              .catch(() => {});
+          }, 150);
+          ackedChats.set(message.chatId, t);
+        }
+      }
+
+      // 4) In-app toast banner (WhatsApp Desktop behaviour). Skip when the
       // sender is us, when we're already viewing the chat, when the chat
       // is muted, or for SYSTEM messages (the call bubble already speaks
       // for itself in the chat).
@@ -141,6 +187,27 @@ export function useChatSocketSync() {
       toast(title, {
         description: previewText(message) || "Sent you a message",
         onClick: () => router.push(ROUTES.CHAT_DETAIL(message.chatId)),
+      });
+    };
+
+    const onDelivered = ({ chatId, userId: receiverId }) => {
+      // Flip every still-SENT receipt for this receiver to DELIVERED.
+      // Don't touch READ rows — DELIVERED is a strict subset.
+      const key = queryKeys.messages.list(chatId);
+      qc.setQueryData(key, (old) => {
+        if (!old) return old;
+        const pages = old.pages.map((page) => ({
+          ...page,
+          messages: page.messages.map((m) => ({
+            ...m,
+            receipts: (m.receipts ?? []).map((r) =>
+              r.userId === receiverId && r.status === ReceiptStatus.SENT
+                ? { ...r, status: ReceiptStatus.DELIVERED }
+                : r,
+            ),
+          })),
+        }));
+        return { ...old, pages };
       });
     };
 
@@ -164,14 +231,19 @@ export function useChatSocketSync() {
       });
 
       // If the reader was the *current user*, drop our unread count for the chat.
+      // Defensive: the chats.all prefix matches multiple cache shapes,
+      // not just the chat-list. Some entries don't carry `chat` at all
+      // (eligible-contacts, blocked-users, etc.) — guard with optional
+      // chaining so a foreign array doesn't blow up the patch.
       if (readerId === userId) {
         qc.getQueriesData({ queryKey: queryKeys.chats.all }).forEach(
           ([cacheKey, data]) => {
             if (!Array.isArray(data)) return;
+            if (!data.some((e) => e?.chat?.id === chatId)) return;
             qc.setQueryData(
               cacheKey,
               data.map((entry) =>
-                entry.chat.id === chatId
+                entry?.chat?.id === chatId
                   ? {
                       ...entry,
                       membership: { ...entry.membership, unreadCount: 0 },
@@ -199,9 +271,10 @@ export function useChatSocketSync() {
       qc.getQueriesData({ queryKey: queryKeys.chats.all }).forEach(
         ([cacheKey, data]) => {
           if (!Array.isArray(data)) return;
+          if (!data.some((e) => e?.chat?.id === chatId)) return;
           qc.setQueryData(
             cacheKey,
-            data.filter((entry) => entry.chat.id !== chatId),
+            data.filter((entry) => entry?.chat?.id !== chatId),
           );
         },
       );
@@ -321,6 +394,7 @@ export function useChatSocketSync() {
     };
 
     socket.on(SOCKET_EVENT.MESSAGE_NEW, onNew);
+    socket.on(SOCKET_EVENT.MESSAGE_DELIVERED, onDelivered);
     socket.on(SOCKET_EVENT.MESSAGE_READ, onRead);
     socket.on(SOCKET_EVENT.GROUP_ADDED, onGroupAdded);
     socket.on(SOCKET_EVENT.GROUP_REMOVED, onGroupRemoved);
@@ -333,7 +407,12 @@ export function useChatSocketSync() {
 
     return () => {
       socket.off(SOCKET_EVENT.MESSAGE_NEW, onNew);
+      socket.off(SOCKET_EVENT.MESSAGE_DELIVERED, onDelivered);
       socket.off(SOCKET_EVENT.MESSAGE_READ, onRead);
+      for (const t of ackedChats.values()) clearTimeout(t);
+      ackedChats.clear();
+      for (const t of readAckedChats.values()) clearTimeout(t);
+      readAckedChats.clear();
       socket.off(SOCKET_EVENT.GROUP_ADDED, onGroupAdded);
       socket.off(SOCKET_EVENT.GROUP_REMOVED, onGroupRemoved);
       socket.off(SOCKET_EVENT.GROUP_UPDATE, onGroupUpdate);

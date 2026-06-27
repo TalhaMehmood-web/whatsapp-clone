@@ -9,6 +9,7 @@
 
 const CHAT_PREFIX = "private-chat-";
 const USER_PREFIX = "private-user-";
+const CHANNEL_PREFIX = "private-channel-";
 const PRESENCE_NAME = "presence-online";
 
 // Per-chat fan-out: message:new, message:edited, typing, etc.
@@ -23,6 +24,15 @@ export function chatChannel(chatId) {
 export function userChannel(userId) {
   if (!userId) throw new Error("userChannel: userId is required");
   return `${USER_PREFIX}${userId}`;
+}
+
+// Per-channel broadcast namespace. Used for CHANNEL_POST_* events.
+// Subscribed by every Channel subscriber's client when the channel
+// page is open — clients leave the room when they navigate away to
+// keep Pusher's concurrent-connection budget under control.
+export function channelChannel(channelId) {
+  if (!channelId) throw new Error("channelChannel: channelId is required");
+  return `${CHANNEL_PREFIX}${channelId}`;
 }
 
 // Single global presence channel. Joining = "I'm online"; leaving =
@@ -42,6 +52,10 @@ export function isUserChannel(name) {
   return typeof name === "string" && name.startsWith(USER_PREFIX);
 }
 
+export function isChannelChannel(name) {
+  return typeof name === "string" && name.startsWith(CHANNEL_PREFIX);
+}
+
 export function isPresenceChannel(name) {
   return name === PRESENCE_NAME;
 }
@@ -52,4 +66,8 @@ export function chatIdFromChannel(name) {
 
 export function userIdFromChannel(name) {
   return isUserChannel(name) ? name.slice(USER_PREFIX.length) : null;
+}
+
+export function channelIdFromChannel(name) {
+  return isChannelChannel(name) ? name.slice(CHANNEL_PREFIX.length) : null;
 }

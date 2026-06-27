@@ -14,6 +14,7 @@ import {
   Images,
   Loader2,
   LogOut,
+  Megaphone,
   Search,
   ShieldCheck,
   Star,
@@ -62,15 +63,19 @@ import {
   useMuteChatMutation,
 } from "@/tanstack/chat/mutations";
 import { useGroupMembersQuery } from "@/tanstack/groups/queries";
-import { useLeaveGroupMutation } from "@/tanstack/groups/mutations";
+import {
+  useLeaveGroupMutation,
+  useReportGroupMutation,
+  useUpdateGroupMetaMutation,
+} from "@/tanstack/groups/mutations";
 import { useAuth } from "@/hooks/use-auth";
-import { ChatMediaBrowser } from "@/features/chat/chat-media-browser/chat-media-browser";
 import { ChatMediaPreviewStrip } from "@/features/chat/chat-media-browser/chat-media-preview-strip";
 import { MemberRole } from "@/models/enums";
 import { COPY, DURATION, ROUTES } from "@/config/constants";
 
 import { GroupInfoMemberRow } from "./group-info-member-row";
 import { GroupInfoAddMembersRow } from "./group-info-add-members-row";
+import { GroupInviteLinkRow } from "./group-invite-link-row";
 
 // Right-side drawer triggered from the chat header for a group chat.
 // Mirrors WhatsApp Web's "Group info" panel from the screenshots — hero,
@@ -87,11 +92,21 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
   const fav = useFavouriteChatMutation();
   const mute = useMuteChatMutation();
   const clearChat = useClearChatMutation();
+  const updateMeta = useUpdateGroupMetaMutation(chatId);
+  const report = useReportGroupMutation(chatId);
 
-  const [browserOpen, setBrowserOpen] = useState(false);
   const [confirm, setConfirm] = useState(null); // "clear" | "leave" | "report" | null
   const [memberQuery, setMemberQuery] = useState("");
   const [showAllMembers, setShowAllMembers] = useState(false);
+
+  // Closes this sheet first, then pushes to the full-screen media
+  // library route. Same pattern as ContactInfoSheet — keeps the back
+  // navigation honest (Back from the route returns to the chat, not a
+  // stale info sheet).
+  const openMediaLibrary = () => {
+    onOpenChange(false);
+    router.push(ROUTES.CHAT_MEDIA(chatId));
+  };
 
   const chat = data?.chat;
   const membership = data?.membership;
@@ -192,16 +207,40 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
       },
     });
 
-  const onConfirmReport = () => {
-    setConfirm(null);
-    toast.success("Report submitted");
-  };
+  const onConfirmReport = () =>
+    report.mutate(undefined, {
+      onSuccess: () => {
+        setConfirm(null);
+        toast.success("Report submitted");
+      },
+      onError: (err) => {
+        setConfirm(null);
+        toast.error(err.response?.data?.error ?? "Failed to report");
+      },
+    });
 
+  // GR1: toggle the chat's announcement-only flag. Server-enforced; the
+  // composer hides itself for non-admins via chat-composer.jsx.
+  const onToggleAnnouncement = () =>
+    updateMeta.mutate(
+      { isAnnouncement: !chat?.isAnnouncement },
+      {
+        onError: (err) =>
+          toast.error(err.response?.data?.error ?? "Failed to update"),
+      },
+    );
+
+  // Nested overlays (media browser, add-members dialog, confirm
+  // AlertDialog, etc.) render as siblings of the outer <Sheet>, not
+  // children. If they're children, Radix treats their dismiss events as
+  // part of the outer Sheet's tree — clicking the inner overlay closes
+  // the outer one too. Siblings keep the two layer stacks independent.
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex h-full w-md flex-col gap-0 overflow-hidden border-wa-border bg-wa-panel p-0 text-wa-text"
+        className="flex h-full w-full flex-col gap-0 overflow-hidden border-wa-border bg-wa-panel p-0 text-wa-text sm:max-w-md"
       >
         <SheetHeader className="flex-row items-center gap-3 space-y-0 border-b border-wa-border px-3 py-3 text-left">
           <Button
@@ -243,10 +282,12 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
             )}
           </div>
 
-          {/* Media, links and docs */}
+          {/* Media, links and docs — navigates to the full-screen
+              library route. Closes the sheet first so a Back tap from
+              the route lands on the chat, not a stale info sheet. */}
           <button
             type="button"
-            onClick={() => setBrowserOpen(true)}
+            onClick={openMediaLibrary}
             className="flex w-full items-center justify-between gap-3 border-y border-wa-border bg-wa-panel-2/40 px-4 py-3 text-left transition-colors hover:bg-wa-panel-2"
           >
             <div className="flex items-center gap-3">
@@ -263,7 +304,7 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
           <ChatMediaPreviewStrip
             media={mediaSample}
             docs={docsSample}
-            onOpen={() => setBrowserOpen(true)}
+            onOpen={openMediaLibrary}
           />
 
           <Separator />
@@ -289,6 +330,36 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
             label="Encryption"
             sublabel="Messages are end-to-end encrypted."
           />
+
+          {/* GR2: invite link row. Renders for admins always; renders
+              for members only when an invite link already exists (so
+              they can re-copy it but not create one). Hidden inside
+              community sub-groups — those use the community invite
+              link instead. */}
+          {!chat.communityId && (
+            <GroupInviteLinkRow
+              chatId={chatId}
+              inviteHandle={chat.inviteHandle}
+              canManage={canManage}
+            />
+          )}
+
+          {/* GR1: admin-only "Only admins can post" toggle. Hidden for
+              community-owned announcement chats — that flag is set by
+              the community-create flow and shouldn't be flipped from
+              here (the community admins manage it via the community). */}
+          {canManage && !chat.communityId && (
+            <Row
+              icon={Megaphone}
+              label="Only admins can post"
+              sublabel={
+                chat.isAnnouncement
+                  ? "On — members can read but not send"
+                  : "Off — every member can send messages"
+              }
+              onClick={onToggleAnnouncement}
+            />
+          )}
 
           <Separator />
 
@@ -409,12 +480,7 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
           </div>
         </ScrollArea>
       </SheetContent>
-
-      <ChatMediaBrowser
-        chatId={chatId}
-        open={browserOpen}
-        onOpenChange={setBrowserOpen}
-      />
+    </Sheet>
 
       <AlertDialog
         open={confirm !== null}
@@ -442,7 +508,7 @@ export function GroupInfoSheet({ chatId, open, onOpenChange }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Sheet>
+    </>
   );
 }
 

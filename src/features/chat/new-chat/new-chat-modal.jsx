@@ -20,6 +20,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useFriendsQuery } from "@/tanstack/friend-requests/queries";
 import { useStartChatMutation } from "@/tanstack/chat/mutations";
+import { useUiStore } from "@/stores/ui-store";
 import { COPY, ROUTES } from "@/config/constants";
 
 // Friend-gated new-chat picker. Only accepted friends show up; if the
@@ -30,6 +31,11 @@ export function NewChatModal({ open, onOpenChange }) {
   const [search, setSearch] = useState("");
   const { data: friends = [], isLoading } = useFriendsQuery();
   const start = useStartChatMutation();
+  // Read the intent set by openNewChat({ intent }). When present we
+  // forward it as `?attach=…` so the chat composer auto-opens the
+  // matching file picker. Captured per-pick so a closed-then-reopened
+  // modal doesn't carry stale intent.
+  const intent = useUiStore((s) => s.newChatIntent);
 
   useEffect(() => {
     if (!open) setSearch("");
@@ -49,7 +55,10 @@ export function NewChatModal({ open, onOpenChange }) {
     start.mutate(peer.id, {
       onSuccess: (chat) => {
         onOpenChange(false);
-        router.push(ROUTES.CHAT_DETAIL(chat.id));
+        const target = intent
+          ? `${ROUTES.CHAT_DETAIL(chat.id)}?attach=${intent}`
+          : ROUTES.CHAT_DETAIL(chat.id);
+        router.push(target);
       },
       onError: (err) =>
         toast.error(err.response?.data?.error ?? "Could not start chat"),

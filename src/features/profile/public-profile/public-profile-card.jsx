@@ -1,21 +1,41 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import {
   AtSign,
+  Ban,
   Check,
   Clock,
   MessageSquare,
+  MoreVertical,
   ShieldCheck,
   UserCheck,
   UserPlus,
+  Users,
   X,
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import {
   useRespondFriendRequestMutation,
@@ -26,6 +46,10 @@ import {
   useOutgoingFriendRequestsQuery,
 } from "@/tanstack/friend-requests/queries";
 import { useStartChatMutation } from "@/tanstack/chat/mutations";
+import {
+  useBlockUserMutation,
+  useUnblockUserMutation,
+} from "@/tanstack/users/mutations";
 import { lastSeenLabel } from "@/utils/date-format";
 import { COPY, ROUTES } from "@/config/constants";
 
@@ -40,6 +64,9 @@ export function PublicProfileCard({ profile }) {
   const send = useSendFriendRequestMutation();
   const respond = useRespondFriendRequestMutation();
   const start = useStartChatMutation();
+  const block = useBlockUserMutation();
+  const unblock = useUnblockUserMutation();
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   // We need the request id for accept/decline/cancel. Pull the cached
   // incoming + outgoing lists and look up by peer id.
@@ -109,8 +136,77 @@ export function PublicProfileCard({ profile }) {
     );
   };
 
+  const onConfirmBlock = () => {
+    setConfirmBlock(false);
+    block.mutate(
+      {
+        id: profile.id,
+        name: profile.name,
+        avatar: profile.avatar,
+        handle: profile.handle,
+      },
+      {
+        onSuccess: () => toast.success("Contact blocked"),
+        onError: (err) =>
+          toast.error(err.response?.data?.error ?? "Failed to block"),
+      },
+    );
+  };
+
+  const onUnblock = () =>
+    unblock.mutate(
+      {
+        id: profile.id,
+        handle: profile.handle,
+      },
+      {
+        onSuccess: () => toast.success("Contact unblocked"),
+        onError: (err) =>
+          toast.error(err.response?.data?.error ?? "Failed to unblock"),
+      },
+    );
+
+  const isSelf = profile.relationship === "SELF";
+  const isBlocked = !!profile.isBlocked;
+
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col items-center px-6 py-10 text-center">
+    <div className="relative mx-auto flex w-full max-w-md flex-col items-center px-6 py-10 text-center">
+      {/* Overflow menu — only shown for non-self profiles. Block /
+          Unblock are the only actions today; Report could land here
+          next without changing the trigger. */}
+      {!isSelf && (
+        <div className="absolute right-4 top-4">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="More"
+                className="text-wa-text-muted hover:text-wa-text"
+              >
+                <MoreVertical className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              {isBlocked ? (
+                <DropdownMenuItem onClick={onUnblock} disabled={unblock.isPending}>
+                  <Ban className="mr-2 size-4" />
+                  Unblock {profile.name?.split(" ")[0] ?? "user"}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => setConfirmBlock(true)}
+                  className="text-wa-danger focus:text-wa-danger"
+                >
+                  <Ban className="mr-2 size-4" />
+                  Block {profile.name?.split(" ")[0] ?? "user"}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
       <Avatar className="size-32">
         <AvatarImage src={profile.avatar ?? undefined} alt={profile.name} />
         <AvatarFallback className="bg-wa-panel-3 text-2xl">
@@ -149,25 +245,76 @@ export function PublicProfileCard({ profile }) {
             value={COPY.FRIENDS_LABEL}
           />
         )}
+        {profile.mutualChatCount > 0 && (
+          <Stat
+            icon={Users}
+            label="Chats together"
+            value={
+              profile.mutualChatCount === 1
+                ? "1 chat"
+                : `${profile.mutualChatCount} chats`
+            }
+          />
+        )}
       </div>
 
-      <ActionFooter
-        relationship={profile.relationship}
-        canAct={{
-          incoming: !!incomingId,
-          outgoing: !!outgoingId,
-        }}
-        loading={{
-          add: send.isPending,
-          respond: respond.isPending,
-          start: start.isPending,
-        }}
-        onMessage={onMessage}
-        onAdd={onAdd}
-        onAccept={onAccept}
-        onDecline={onDecline}
-        onCancel={onCancel}
-      />
+      {isBlocked ? (
+        <div className="mt-8 flex w-full flex-col items-center gap-3 rounded-lg border border-wa-border bg-wa-panel-2 p-4 text-center">
+          <Ban className="size-5 text-wa-danger" />
+          <p className="text-sm text-wa-text">
+            You blocked {profile.name?.split(" ")[0] ?? "this contact"}.
+          </p>
+          <Button
+            variant="ghost"
+            onClick={onUnblock}
+            loading={unblock.isPending}
+            className="text-wa-green hover:text-wa-green/90"
+          >
+            Unblock
+          </Button>
+        </div>
+      ) : (
+        <ActionFooter
+          relationship={profile.relationship}
+          canAct={{
+            incoming: !!incomingId,
+            outgoing: !!outgoingId,
+          }}
+          loading={{
+            add: send.isPending,
+            respond: respond.isPending,
+            start: start.isPending,
+          }}
+          onMessage={onMessage}
+          onAdd={onAdd}
+          onAccept={onAccept}
+          onDecline={onDecline}
+          onCancel={onCancel}
+        />
+      )}
+
+      <AlertDialog open={confirmBlock} onOpenChange={setConfirmBlock}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Block {profile.name ?? "this contact"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Blocked contacts can&apos;t message you or see your last seen
+              and online status. You can unblock them at any time.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{COPY.CONFIRM_CANCEL}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={onConfirmBlock}
+              className="bg-wa-danger text-white hover:bg-wa-danger/90"
+            >
+              Block
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

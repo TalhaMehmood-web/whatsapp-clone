@@ -1,6 +1,7 @@
 import { prisma } from "./prisma.js";
 import { isBlockedBetween } from "./block.js";
 import { areFriends } from "./friend-requests.js";
+import { applyDerivedPresence } from "./presence.js";
 import { CHAT_TAB } from "@/config/constants";
 
 const CHAT_INCLUDE = {
@@ -95,9 +96,12 @@ function tabFilter(tab) {
 
 function toEntry(chat, userId) {
   const membership = chat.members.find((m) => m.userId === userId);
+  // Derive isOnline from lastSeen recency for every peer — the raw DB
+  // column is stuck-on for anyone who closed their tab without logging
+  // out. See lib/presence.js.
   const peers = chat.members
     .filter((m) => m.userId !== userId)
-    .map((m) => m.user);
+    .map((m) => applyDerivedPresence({ ...m.user }));
   const labelIds = (membership?.labels ?? []).map((l) => l.labelId);
   return {
     chat: {

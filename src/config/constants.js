@@ -50,6 +50,7 @@ export const ROUTES = Object.freeze({
   REGISTER: "/register",
   CHAT_INDEX: "/chat",
   CHAT_DETAIL: (id) => `/chat/${id}`,
+  CHAT_MEDIA: (id) => `/chat/${id}/media`,
   STATUS: "/status",
   CHANNELS: "/channels",
   COMMUNITIES: "/communities",
@@ -97,6 +98,10 @@ export const SOCKET_EVENT = Object.freeze({
   MESSAGE_SEND: "message:send",
   MESSAGE_NEW: "message:new",
   MESSAGE_READ: "message:read",
+  // Fired when a recipient's client ACKs that it received MESSAGE_NEW
+  // (their socket is live). Distinct from MESSAGE_READ — the chat may
+  // not be focused yet. Drives the double-grey tick.
+  MESSAGE_DELIVERED: "message:delivered",
   TYPING_START: "typing:start",
   TYPING_STOP: "typing:stop",
   TYPING_UPDATE: "typing:update",
@@ -121,6 +126,22 @@ export const SOCKET_EVENT = Object.freeze({
   GROUP_ADDED: "group:added",
   GROUP_REMOVED: "group:removed",
   GROUP_UPDATE: "group:update",
+  // Community lifecycle. Fired on the per-user private channel.
+  COMMUNITY_ADDED: "community:added",
+  COMMUNITY_REMOVED: "community:removed",
+  COMMUNITY_UPDATE: "community:update",
+  // Channel post fanout. Fired on private-channel-{id} to every
+  // subscriber. CHANNEL_POST_REPLY only fans to thread participants.
+  CHANNEL_POST_NEW: "channel:post:new",
+  CHANNEL_POST_EDITED: "channel:post:edited",
+  CHANNEL_POST_DELETED: "channel:post:deleted",
+  CHANNEL_POST_REACTION: "channel:post:reaction",
+  CHANNEL_POST_REPLY: "channel:post:reply",
+  // Status fanout. Fired on each friend's per-user private channel so
+  // the status list updates without a manual refresh. Author payload is
+  // minimal — the client invalidates the feed query and re-renders.
+  STATUS_NEW: "status:new",
+  STATUS_DELETED: "status:deleted",
 });
 
 // ─── Local storage keys ────────────────────────────────────────────────────
@@ -301,6 +322,21 @@ export const COPY = Object.freeze({
   COMMUNITIES_DESC_LABEL: "Description",
   COMMUNITIES_DESC_PLACEHOLDER: "What's this community about?",
   COMMUNITIES_CREATE: "Create community",
+  COMMUNITIES_HANDLE_LABEL: "@handle",
+  COMMUNITIES_HANDLE_PLACEHOLDER: "classof2024",
+  COMMUNITIES_HANDLE_HINT: "Lowercase letters, numbers, dot and underscore.",
+  COMMUNITIES_ANNOUNCEMENTS: "Announcements",
+  COMMUNITIES_MEMBERS_TITLE: "Members",
+  COMMUNITIES_ADD_MEMBERS: "Add members",
+  COMMUNITIES_LEAVE: "Leave community",
+  COMMUNITIES_DELETE: "Delete community",
+  COMMUNITIES_INVITE_LINK: "Invite link",
+  COMMUNITIES_INVITE_COPIED: "Invite link copied",
+  COMMUNITIES_SUB_GROUP_ADD: "Add member group",
+  COMMUNITIES_CAP_MEMBERS: (n) =>
+    `Free-tier portfolio app — max ${n} members per community.`,
+  COMMUNITIES_CAP_GROUPS: (n) =>
+    `Free-tier portfolio app — max ${n} sub-groups per community.`,
   COMMUNITIES_FOOTER:
     "Your personal messages in communities are end-to-end encrypted",
   COMMUNITIES_MEDIA_TITLE: "Media",
@@ -533,9 +569,14 @@ export const COPY = Object.freeze({
   // Search
   SEARCH_TITLE: "Search",
   SEARCH_TAB_MESSAGES: "Messages",
-  SEARCH_TAB_CONTACTS: "Contacts",
+  SEARCH_TAB_CONTACTS: "People",
   SEARCH_NO_RESULTS: "No results yet.",
   SEARCH_TYPE_TO_START: "Type to search across your chats.",
+  SEARCH_MESSAGES_PLACEHOLDER: "Search messages — press Enter",
+  SEARCH_MESSAGES_PRESS_ENTER:
+    "Type something then press Enter to search every chat you're in.",
+  SEARCH_MESSAGES_NO_RESULTS: "No messages match that search.",
+  SEARCH_MESSAGES_CLEAR: "Clear",
   SEARCH_IN_CHAT_PLACEHOLDER: "Search this chat",
   SEARCH_NEXT: "Next match",
   SEARCH_PREV: "Previous match",
@@ -699,3 +740,20 @@ export const PAGE_SIZE = Object.freeze({
 // pickers + server-side guard in /api/messages/upload.
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 export const MAX_UPLOAD_LABEL = "50 MB";
+
+// Community + Channel free-tier caps. Enforced server-side (lib/) and
+// surfaced in the UI via COPY.COMMUNITIES_CAP_* / CHANNELS_CAP_* so the
+// failure mode is a clear banner, not a mysterious 500.
+//
+// Numbers are sized for the combined Pusher (200k events/day) +
+// Cloudinary (25GB) + Neon (0.5GB) free tiers. See
+// "Communities + Channels overhaul" in CLAUDE.md for the math.
+export const COMMUNITY_MAX_MEMBERS = 50;
+export const COMMUNITY_MAX_SUB_GROUPS = 10;
+export const CHANNEL_MAX_SUBSCRIBERS = 500;
+export const CHANNEL_POST_INTERVAL_MS = 60 * 1000; // 1/min per author
+export const CHANNEL_POST_REPLY_MAX = 100;
+// Owner is implicit and not counted. Each admin can post → more
+// Pusher events per channel; 5 keeps the multiplier within the
+// 200k-events/day free-tier budget.
+export const CHANNEL_MAX_ADMINS = 5;

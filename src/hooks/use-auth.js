@@ -19,7 +19,7 @@ export function useAuth() {
     if (!isHydrated) hydrate();
   }, [isHydrated, hydrate]);
 
-  const { data, isLoading, isError } = useMeQuery();
+  const { data, isFetched, isError } = useMeQuery();
 
   useEffect(() => {
     if (data && data !== user) setUser(data);
@@ -29,9 +29,21 @@ export function useAuth() {
     if (isError && accessToken) clearSession();
   }, [isError, accessToken, clearSession]);
 
+  // `isLoading` covers three "don't redirect yet" windows:
+  //   1. localStorage hasn't been read (!isHydrated)
+  //   2. We have a token but /me hasn't returned yet — without this, the
+  //      tick between "token landed" and "fetch resolves" trips the
+  //      AuthGuard's redirect to /login on every full page refresh,
+  //      because `useQuery`'s `isLoading` is false while `enabled` was
+  //      false up until this moment.
+  //   3. The cached user in the store hasn't been populated yet either
+  //      (covers the persisted-cache restore path: data may already be
+  //      available from IndexedDB but the setUser effect hasn't run).
   return {
     user: user ?? data ?? null,
     isAuthenticated: !!user || !!data,
-    isLoading: !isHydrated || (!!accessToken && isLoading),
+    isLoading:
+      !isHydrated ||
+      (!!accessToken && !user && !data && !isFetched && !isError),
   };
 }

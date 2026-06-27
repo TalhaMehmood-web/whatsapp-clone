@@ -51,6 +51,7 @@ export function NotificationsHub({ compact = false }) {
         <SheetTrigger asChild>{trigger}</SheetTrigger>
         <SheetContent
           side="bottom"
+          showCloseButton
           className="flex h-[80dvh] flex-col p-0"
         >
           <SheetHeader className="sr-only">

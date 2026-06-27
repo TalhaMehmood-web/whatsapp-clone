@@ -27,6 +27,11 @@ import { CHAT_TAB } from "@/config/constants";
 
 const LIVE_CHAT_QUERY_DEFAULTS = {
   staleTime: Infinity,
+  // gcTime: Infinity makes the IndexedDB-persisted chat list + detail
+  // actually survive page reloads — the default 5-min gcTime would
+  // evict the entry before the persister rehydrates it. WhatsApp Web
+  // mirrors chats locally for the same reason.
+  gcTime: Infinity,
   refetchOnWindowFocus: false,
   refetchOnMount: false,
 };

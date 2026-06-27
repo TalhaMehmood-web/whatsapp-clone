@@ -42,12 +42,24 @@ export const queryKeys = {
     viewers: (id) => ["status", "viewers", id],
   },
   communities: {
-    list: ["communities"],
+    all: ["communities"],
+    list: ["communities", "list"],
     detail: (id) => ["communities", "detail", id],
+    byHandle: (handle) => ["communities", "by-handle", handle],
+  },
+  groups: {
+    byInviteHandle: (handle) => ["groups", "by-invite-handle", handle],
   },
   channels: {
-    list: ["channels"],
+    all: ["channels"],
+    list: ["channels", "list"],
     detail: (id) => ["channels", "detail", id],
+    byHandle: (handle) => ["channels", "by-handle", handle],
+    explore: (q) => ["channels", "explore", q ?? ""],
+    posts: (id) => ["channels", "posts", id],
+    replies: (postId) => ["channels", "replies", postId],
+    admins: (id) => ["channels", "admins", id],
+    subscribers: (id) => ["channels", "subscribers", id],
   },
   labels: {
     list: ["labels"],
@@ -59,6 +71,7 @@ export const queryKeys = {
   search: {
     global: (q) => ["search", "global", q],
     chat: (chatId, q) => ["search", "chat", chatId, q],
+    messages: (q) => ["search", "messages", q],
   },
   friendRequests: {
     incoming: ["friend-requests", "incoming"],

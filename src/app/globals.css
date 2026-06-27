@@ -166,6 +166,24 @@
   z-index: 1;
 }
 
+/* Deep-link flash. Applied by MessageDeepLinkScroller when a user lands
+   on /chat/[id]?msg={id} from the global search. The attribute is
+   stripped after ~1.5s; the keyframe takes care of fading out so a
+   user lands at the message and clearly sees which one matched. */
+[data-deeplink="true"] {
+  animation: wa-deeplink-flash 1.4s ease-out;
+}
+@keyframes wa-deeplink-flash {
+  0% {
+    background-color: color-mix(in oklab, var(--wa-green) 25%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--wa-green) 30%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 /* Custom thin scrollbars (WhatsApp Web style) */
 *::-webkit-scrollbar {
   width: 6px;

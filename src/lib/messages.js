@@ -6,7 +6,7 @@ import { isBlockedBetween } from "./block.js";
 import { areFriends } from "./friend-requests.js";
 import { previewText } from "@/utils/message-format";
 import { PAGE_SIZE, ROUTES, SOCKET_EVENT } from "@/config/constants";
-import { MessageType, ReceiptStatus } from "@/models/enums";
+import { MemberRole, MessageType, ReceiptStatus } from "@/models/enums";
 
 // Read messages oldest→newest within a chat. The API caller treats the
 // `nextCursor` as opaque — it's just the createdAt of the oldest message in
@@ -81,15 +81,52 @@ export async function createMessage({
   await assertMembership(chatId, senderId);
   await assertNotBlockedFor1on1(chatId, senderId);
 
-  // Honour the chat's disappearing-messages TTL by stamping expiresAt on
-  // outgoing rows. Server-side eviction is a separate cron — here we
-  // just record when the row should disappear.
-  const chatForTtl = await prisma.chat.findUnique({
+  // Single fetch for: disappearing TTL + announcement-only enforcement
+  // (CO4). Announcement chats live under a community and only let
+  // OWNER/ADMIN members of that community send messages — regular
+  // members can read but not post.
+  const chatMeta = await prisma.chat.findUnique({
     where: { id: chatId },
-    select: { disappearingSeconds: true },
+    select: {
+      disappearingSeconds: true,
+      isAnnouncement: true,
+      communityId: true,
+    },
   });
-  const expiresAt = chatForTtl?.disappearingSeconds
-    ? new Date(Date.now() + chatForTtl.disappearingSeconds * 1000)
+  if (chatMeta?.isAnnouncement) {
+    // Announcement chats restrict posting to OWNER/ADMIN. For community
+    // announcement chats the role is at the community level; for
+    // standalone groups it's the chat-member role.
+    let isAdmin = false;
+    if (chatMeta.communityId) {
+      const role = await prisma.communityMember.findUnique({
+        where: {
+          communityId_userId: {
+            communityId: chatMeta.communityId,
+            userId: senderId,
+          },
+        },
+        select: { role: true },
+      });
+      isAdmin =
+        role?.role === MemberRole.OWNER || role?.role === MemberRole.ADMIN;
+    } else {
+      const cm = await prisma.chatMember.findUnique({
+        where: { chatId_userId: { chatId, userId: senderId } },
+        select: { role: true },
+      });
+      isAdmin = cm?.role === MemberRole.OWNER || cm?.role === MemberRole.ADMIN;
+    }
+    if (!isAdmin) {
+      const err = new Error(
+        "Only admins can post in this announcement group.",
+      );
+      err.status = 403;
+      throw err;
+    }
+  }
+  const expiresAt = chatMeta?.disappearingSeconds
+    ? new Date(Date.now() + chatMeta.disappearingSeconds * 1000)
     : null;
 
   const message = await prisma.$transaction(async (tx) => {
@@ -155,23 +192,47 @@ export async function createMessage({
       skipDuplicates: true,
     });
 
-    return created;
+    // Re-fetch the message WITH receipts so the broadcast payload
+    // includes them. Without this, peers patch their cache with
+    // `receipts: []` (because the initial include ran BEFORE the seed
+    // above), and every subsequent MESSAGE_READ / MESSAGE_DELIVERED
+    // patch becomes a no-op since `m.receipts.map(...)` operates on
+    // an empty array. Result: the sender's tick stayed single-grey
+    // forever, even after the receiver read the message.
+    return tx.message.findUnique({
+      where: { id: created.id },
+      include: {
+        sender: { select: { id: true, name: true, avatar: true } },
+        replyTo: {
+          select: { id: true, content: true, type: true, senderId: true },
+        },
+        reactions: true,
+        receipts: true,
+      },
+    });
   });
 
-  // Fan-out: every member receives the event on their personal user room
-  // so peers who aren't currently viewing the chat still get the live
-  // update (badge + sort-to-top in the chat list, notifications, etc.).
-  // `chat:<id>` is still in play so anyone *in* the room hears it once,
-  // and Socket.IO deduplicates inside a single connection.
+  // Fan-out is FIRE-AND-FORGET — the API returns the message immediately
+  // so the sender's optimistic bubble swaps to the canonical row without
+  // waiting on the chat-member lookup + Pusher trigger latency. Peers
+  // still receive MESSAGE_NEW within a beat over their persistent
+  // Pusher connection. WhatsApp's send path feels instant because the
+  // wire send and the receipt fanout are decoupled the same way.
   emitToChat(chatId, SOCKET_EVENT.MESSAGE_NEW, message);
-  const members = await prisma.chatMember.findMany({
-    where: { chatId },
-    select: { userId: true },
-  });
-  for (const { userId } of members) {
-    if (userId === senderId) continue;
-    emitToUser(userId, SOCKET_EVENT.MESSAGE_NEW, message);
-  }
+  (async () => {
+    try {
+      const members = await prisma.chatMember.findMany({
+        where: { chatId },
+        select: { userId: true },
+      });
+      for (const { userId } of members) {
+        if (userId === senderId) continue;
+        emitToUser(userId, SOCKET_EVENT.MESSAGE_NEW, message);
+      }
+    } catch (err) {
+      console.error("message fanout failed", err);
+    }
+  })();
 
   // Fire-and-forget Web Push to every peer who isn't the sender. We don't
   // await this — push failures shouldn't slow the API response.
@@ -354,6 +415,137 @@ export async function starMessage({ userId, messageId, value }) {
       .delete({ where: { userId_messageId: { userId, messageId } } })
       .catch(() => {});
   }
+}
+
+// Global cross-chat search. Returns at most `limit` Message rows whose
+// content matches `q` (case-insensitive substring) AND that the caller
+// is allowed to read — i.e. they're a member of the chat, the message
+// isn't tombstoned, isn't earlier than their per-chat clearedAt
+// cutoff, and isn't on their MessageHidden mask.
+//
+// Per the C11 audit policy this is called once on Enter, never on
+// every keystroke. The 50-row cap keeps Neon compute bounded; older
+// matches require a more specific query (no pagination by design —
+// the user is meant to refine).
+//
+// Includes minimal chat + sender info so the result card can render
+// "[chat name] · sender — snippet" without N+1 follow-up queries.
+export async function searchMessages({ userId, q, limit = 50 }) {
+  const query = q?.trim();
+  if (!query) return { results: [] };
+
+  // Resolve the caller's chat memberships (with their clearedAt
+  // cutoffs) and their per-user hidden-message set in parallel. Both
+  // are O(rows-the-user-has) and indexed.
+  const [memberships, hidden] = await Promise.all([
+    prisma.chatMember.findMany({
+      where: { userId },
+      select: { chatId: true, clearedAt: true },
+    }),
+    prisma.messageHidden.findMany({
+      where: { userId },
+      select: { messageId: true },
+    }),
+  ]);
+  if (memberships.length === 0) return { results: [] };
+
+  const hiddenIds = hidden.map((h) => h.messageId);
+  const chatIds = memberships.map((m) => m.chatId);
+
+  // Two filter expressions to honour the per-user clearedAt cutoff:
+  //   - chats with no clearedAt: include any matching message.
+  //   - chats with a clearedAt: include only messages after that
+  //     stamp. Implemented as an OR over the two sub-clauses.
+  const cleared = memberships.filter((m) => m.clearedAt);
+  const fresh = memberships.filter((m) => !m.clearedAt);
+
+  const orClauses = [];
+  if (fresh.length > 0) {
+    orClauses.push({ chatId: { in: fresh.map((m) => m.chatId) } });
+  }
+  for (const m of cleared) {
+    orClauses.push({
+      chatId: m.chatId,
+      createdAt: { gt: m.clearedAt },
+    });
+  }
+
+  const messages = await prisma.message.findMany({
+    where: {
+      AND: [
+        { content: { contains: query, mode: "insensitive" } },
+        { deletedAt: null },
+        ...(hiddenIds.length > 0 ? [{ id: { notIn: hiddenIds } }] : []),
+        // chat-membership + clearedAt gate
+        orClauses.length > 0 ? { OR: orClauses } : { chatId: { in: chatIds } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    include: {
+      sender: { select: { id: true, name: true, avatar: true } },
+      chat: {
+        select: {
+          id: true,
+          name: true,
+          photo: true,
+          isGroup: true,
+          // For 1:1 chats the name lives on the peer's User row; pull
+          // the membership rows so the route can resolve "peer name"
+          // for the card without a second round-trip.
+          members: {
+            where: { userId: { not: userId } },
+            select: {
+              user: { select: { id: true, name: true, avatar: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Shape the response so the client doesn't have to massage Prisma
+  // payloads. `displayName` collapses 1:1 vs group naming logic into
+  // one field. `snippet` is the matched line trimmed to ~160 chars.
+  const lower = query.toLowerCase();
+  const results = messages.map((m) => {
+    const peer = m.chat.members[0]?.user ?? null;
+    const displayName =
+      m.chat.name ?? peer?.name ?? "Chat";
+    const displayPhoto = m.chat.photo ?? peer?.avatar ?? null;
+    return {
+      message: {
+        id: m.id,
+        chatId: m.chatId,
+        content: m.content,
+        createdAt: m.createdAt,
+        sender: m.sender,
+        snippet: snippetAround(m.content ?? "", lower, 160),
+      },
+      chat: {
+        id: m.chat.id,
+        isGroup: m.chat.isGroup,
+        displayName,
+        displayPhoto,
+      },
+    };
+  });
+
+  return { results };
+}
+
+// Cuts `text` to ~`width` chars centred on the first match. Falls back
+// to the leading slice when the match is near the start. Pure helper.
+function snippetAround(text, lowerNeedle, width) {
+  if (!text) return "";
+  const idx = text.toLowerCase().indexOf(lowerNeedle);
+  if (idx < 0 || text.length <= width) return text;
+  const half = Math.floor(width / 2);
+  const start = Math.max(0, idx - half);
+  const end = Math.min(text.length, start + width);
+  const prefix = start === 0 ? "" : "…";
+  const suffix = end === text.length ? "" : "…";
+  return prefix + text.slice(start, end) + suffix;
 }
 
 export async function listStarred(userId) {

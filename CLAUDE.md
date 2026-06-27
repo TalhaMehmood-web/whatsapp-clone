@@ -1294,3 +1294,142 @@ Vercel can't host a long-lived WebSocket server, so the custom `server.js` + Soc
 - Sign up at pusher.com (no card). Create a Channels app. Pick the cluster closest to your users (US-east is fine for now).
 - Grab `app_id`, `key`, `secret`, `cluster` from the app dashboard.
 - Have them ready before invoking P1 so the env step doesn't block.
+
+---
+
+## Communities + Channels overhaul (planned, not started)
+
+The current `Community`, `CommunityMember`, `Channel`, `ChannelSubscriber` schemas are stubs from Phase 10 of the original build plan. UI surfaces exist but don't function. This block brings both features to production-grade Telegram/WhatsApp parity, plus two AI-era differentiators, while staying inside the free-tier budget of every service we depend on.
+
+### Free-tier budget (the design boundary)
+
+- **Pusher**: 100 concurrent, 200k events/day. A channel post that fans out to N subscribers = N events. We enforce subscriber + post-rate caps so we never silently blow the quota.
+- **Vercel Hobby**: 100 GB-hours/month, daily cron only, 10s function timeout (60s if configured).
+- **Cloudinary**: 25 GB storage, 25 GB bandwidth/month.
+- **Neon**: 0.5 GB DB storage, 190 compute-hours/month.
+
+### Hard caps enforced server-side
+
+These appear to users as clear "free-tier portfolio app" messages rather than mysterious failures:
+
+- **Communities**: 50 members max, 10 sub-groups max per community.
+- **Channels**: 500 subscribers max, 1 post per author per minute, 100 thread replies per post.
+
+### Phases (sequential — finish each before starting the next)
+
+| Phase | What | Why this order |
+| ----- | ---- | -------------- |
+| **C1** | **Communities CRUD + roles** — `lib/communities.js`, routes (`/api/communities`, `/api/communities/[id]`, `/api/communities/[id]/members`, `/api/communities/[id]/leave`), member-role gating (OWNER/ADMIN/MEMBER), 50-member cap. Auto-create one "Announcements" child group on community create. | Communities UI already exists in the nav rail; routes are 404 today. Foundation for sub-groups. |
+| **C2** | **Community → sub-group linking** — add `POST /api/communities/[id]/sub-groups` that wraps `startGroupChat` and sets `Chat.communityId`. 10-sub-group cap. List under community detail. Drop from list when the user leaves the community. | Reuses the existing groups path; just sets the FK. Zero new schema. |
+| **C3** | **Community detail UI** — community card, sub-group list grouped by community on the chat list, member sheet, role-management dropdown, invite-link generator (`/c/[handle]`). | UI is the user-visible payoff for C1+C2. Reuses existing list rows + sheet primitives. |
+| **C4** | **Channels schema upgrade** — add `ChannelPost` (text + media + author + timestamp, indexed by channelId + createdAt), `ChannelPostReaction`, `Channel.ownerId`. Add `mediaPublicId` + `mediaResource` columns so the existing cron prunes deleted channel media. | All later phases depend on `ChannelPost` existing. |
+| **C5** | **Channel CRUD + subscribe** — `lib/channels.js`, routes for create / update / delete / subscribe / unsubscribe / mute. 500-subscriber cap. Public read for `/api/channels/explore` (handle search, no auth needed). | Mirrors the chats pattern; nothing tricky. |
+| **C6** | **Channel posting + realtime fanout** — `POST /api/channels/[id]/posts` with 1-per-minute-per-author rate limit. Triggers `private-channel-{id}` with `CHANNEL_POST_NEW`. New channel namespace added to `lib/realtime/channels.js` + auth route. | Single hot path for the whole feature. |
+| **C7** | **Channel detail UI** — full-screen feed, post composer, reaction pills, "View thread" pill. Per-channel cache patches via realtime sync hook (same shape as `useChatSocketSync`). | First "look it works" moment. |
+| **C8** | **Differentiator 1 — threaded replies** — `ChannelPostThread` model (post + reply + author). Reply-only fanout to thread participants + post author, NOT the whole channel. 100-reply cap per post. Sheet UI mirroring the per-message-reaction pattern. | Real differentiator vs WhatsApp/Telegram. Tight event budget because fanout is bounded. |
+| **C9** | **Differentiator 2 — AI weekly digest** — `ChannelDigest` model (channelId + weekStart, unique). Daily Vercel cron (`/api/cron/channel-digest`) picks channels with new posts that day, calls Claude Haiku to summarize the top 5. Renders as a "This week in [channel]" card pinned above the post feed. Cached infinitely — only the cron writes. | One LLM call per channel per day. Cost ≈ $0 at portfolio traffic. |
+| **C10** | **Discover surface** — `/channels/explore` page: trending channels (most-subscribed in the last 7 days), search-by-handle, suggested-for-you (channels your friends subscribe to). | Drives subscription growth without spamming users. |
+| **C11** | **Search & filter audit** — runs LAST, after every list in the app exists. Each search input gets classified into one of three patterns and rewritten to match. The rule of thumb: *if the data is already in the cache, filter in memory; if it isn't, hit the server.* Going server-side for data the client already has would add a round-trip per keystroke for zero correctness gain. Going client-side for data the client doesn't have means showing stale results. The audit table below is the source of truth — update it whenever a new searchable surface is added. | Avoids overengineering small lists into round-trips and avoids under-engineering large lists into stale local filters. |
+
+### Search & filter pattern matrix (drives C11)
+
+| Surface | Pattern | Why |
+| ------- | ------- | --- |
+| Community members sheet | **in-memory** | Parent `useCommunityQuery` already loaded `members[]` |
+| Privacy exception picker | **in-memory** | `useEligibleContactsQuery` cached at `staleTime: Infinity` |
+| Blocked contacts sheet | **in-memory** | `useBlockedUsersQuery` cached at `staleTime: Infinity` |
+| Chat-list tab filter (All/Unread/Favourites/Groups) | **in-memory** | Chat-list cache already filtered server-side at the tab level |
+| Settings list search | **in-memory** | Static 7-row catalogue |
+| Sub-group picker | **in-memory** | Loaded from `useChatsQuery({ tab: GROUPS })` |
+| Global user search (handle/email/phone) | **server, debounced** | Backend lookup; 300ms debounce already in place |
+| Channel discover search | **server, press-enter** | Backend lookup; enter prevents query stampede on every keystroke |
+| Global message search (future feature) | **server, press-enter** | Expensive Postgres full-text scan |
+
+Pattern rules to apply when adding a new searchable surface:
+
+- **In-memory** when the underlying query's result is already cached and the row count is bounded (<200 rows in practice).
+- **Server + press-enter** is the only acceptable pattern for NEW server-side searches. The submitted query is the React Query cache key. No debounce timers, no per-keystroke firing. The user types → presses Enter (or hits the Search button) → one request goes out. A small Clear button resets the committed query back to empty. This rule is enforced for everything added after the Communities + Channels overhaul.
+- **Server + debounced** is **legacy only**. Existing surfaces (global user search, new-group friend search, chat-search-bar) keep working as-is. Do NOT introduce this pattern in new code. `useDebounced` exists in those files but should not be copied into greenfield code.
+- **Never** use a long `staleTime` (>30s) for a per-keystroke cache key. Set `gcTime` short on every cache key that includes a query string so abandoned searches don't accumulate.
+
+### Cross-cutting rules
+
+- **Realtime via the existing port.** New event names go in `SOCKET_EVENT`; channel namespacing is added to `lib/realtime/channels.js` + the auth route. No direct Pusher imports in feature code.
+- **Cache strategy is the same as everything else.** Every read uses `staleTime: Infinity`; every mutation patches the cache in `onSuccess`. Realtime events patch via the sync hook. Zero invalidate-on-settle.
+- **Rate limits live at the route boundary.** In-memory Map keyed by `(authorId, channelId)` for the per-minute cap, identical to the typing throttle.
+- **Cloudinary cleanup reuses the existing cron.** Channel post deletes call `destroyMedia`; the daily prune cron extends to scan `ChannelPost.expiresAt` if we ever add ephemeral posts (out of scope today).
+- **Subscriber-cap fan-out**. Server checks `Channel.subscriberCount` (denormalised on the row, incremented atomically on subscribe) before posting; over-limit channels reject the post with a clear 413.
+- **No schema changes outside the C4 and C8 batches.** Migrations are batched to keep `prisma db push` runs minimal.
+
+### Scope cuts (deliberately out)
+
+- **Group video calls inside community sub-groups.** Out — would need a real SFU; calls stay 1:1.
+- **Channel paywalls / monetisation.** Out — Stripe etc. is a separate feature category.
+- **Channel-wide search.** Deferred — would benefit from the global-message-search feature; build that first if needed.
+- **E2E encryption on channel posts.** Out — incompatible with the AI digest, which needs to read the content.
+
+---
+
+## Global message search (planned, single phase)
+
+### Phase G1 — Search every message you can read, scoped to your chats
+
+Cross-chat search over message content. The user opens `/search`, picks the "Messages" tab, types a query, hits **Enter** — server runs a `LIKE` against every chat the user is a member of and returns `{ message, chat, sender, snippet }` cards that deep-link into the chat at that message.
+
+Per the C11 audit policy: **press-enter only. No debounce. No on-change fires.** The committed query is the React Query cache key; `gcTime` is short so per-query cache entries don't accumulate.
+
+### Scope
+
+- **In scope**: text content of `Message.content` across every chat the caller is a `ChatMember` of. Honours `clearedAt` and the `MessageHidden` per-user mask the same way the regular messages list does. Tombstoned messages (`deletedAt != null`) excluded.
+- **Out of scope**: media OCR, attachment filename search, search inside channels (deferred — would reuse the same pattern against `ChannelPost.content`), Postgres FTS (`tsvector`/`tsquery` would be nicer but a plain `ILIKE` with the existing `(chatId, createdAt)` index is fast enough on a free-tier portfolio app).
+
+### What lands
+
+- **`lib/messages.js → searchMessages({ userId, q, limit })`** — joins ChatMember → Message, applies `clearedAt` + `MessageHidden` filters, runs `ILIKE` on `content`, returns at most 50 results sorted newest-first. Includes chat name + sender for the result card.
+- **`GET /api/search/messages?q=…`** — thin route handler.
+- **`useMessageSearchQuery(committedQ)`** in `tanstack/search/queries.js` — short `gcTime`, `staleTime: 30s`, `enabled` on non-empty committed query.
+- **`/search` page upgrade** — existing global search becomes tabbed (People / Messages). Messages tab uses the press-enter pattern; People tab keeps the existing debounced user search (legacy).
+- **Result card** opens the chat at `/chat/{chatId}?msg={messageId}` so the chat detail can scroll the message into view and flash it (reusing the same anchor IDs the in-chat search already uses).
+- **No schema change.** Existing `(chatId, createdAt)` index is enough.
+
+### Cross-cutting rules
+
+- Server limits results to 50 to keep Neon compute bounded.
+- Search is membership-gated server-side — the route never returns a message from a chat the caller isn't in.
+- No per-keystroke API calls. Period. The input fires only on Enter or on the explicit Search button.
+
+---
+
+## Channels parity sprint (planned, multi-phase)
+
+Bringing the channel feature up to WhatsApp-channel parity: multiple admins, public/private, real followers list with privacy gating, full "Channel info" sheet, abuse reporting, and empty-state polish. Everything stays inside the existing free-tier budget.
+
+### Caps + constraints
+
+- **Admins per channel**: 5 max. Owner is implicit + counted separately. Free-tier rationale: each admin can post → more Pusher events per channel → keep the multiplier sane.
+- **Reports per (user, channel)**: 1 row only. Spamming "report" doesn't help anyone.
+- **Public/private** is a single Boolean on `Channel`. Private channels are reachable by direct link only; they're hidden from `exploreChannels`.
+
+### Phases (do in order)
+
+| Phase | What | Honest size |
+| ----- | ---- | ----------- |
+| **CH1** | **Multi-admin schema + transfer ownership.** New `ChannelAdmin` join (channelId + userId, unique). `addAdmin / removeAdmin / transferOwnership / listAdmins` in `lib/channels.js`. Update `assertOwner` callers — posting + delete-channel stay owner-only, post-deletion + channel edit relax to owner-or-admin. Routes: `/api/channels/[id]/admins`, `/api/channels/[id]/admins/[userId]`, `/api/channels/[id]/transfer`. | ~half day |
+| **CH2** | **Public/private + report.** Add `Channel.isPrivate` + `ChannelReport` model. `exploreChannels` filters out private. New `reportChannel` lib + `POST /api/channels/[id]/report` (idempotent per user). UI: toggle in the info sheet (owner-only), Report row in the 3-dot menu. | ~half day |
+| **CH3** | **Followers list with privacy gating.** `GET /api/channels/[id]/subscribers` returns ALL subscribers when caller is owner/admin; otherwise returns only the caller's accepted-friend overlap (this is the closest analog to WhatsApp's "contacts or admins" rule using the data we actually have). New `ChannelSubscribersSheet` reusing the contact-list row pattern. | ~half day |
+| **CH4** | **Channel info sheet.** Right-side sheet (matches contact-info pattern). Hero (avatar + name + handle + follower count). Channel-alerts row (wraps existing mute). Channel-link row with copy + share. Admins strip with "Invite admins" CTA (opens add-admin picker). Transfer ownership row (owner-only). Delete (owner-only). Report (non-owner). Replaces the cluttered 3-dot menu. | ~half day |
+| **CH5** | **Owner empty-state polish on the feed.** When an owner opens a channel with zero posts, show two big inline CTAs — "Add description" (opens edit dialog) and "Share channel link" (copies). Otherwise the feed renders normally. | ~30 min |
+
+### Cross-cutting rules
+
+- **No new realtime events.** All admin/report/privacy changes are settings-style operations that don't need fanout. The existing `CHANNEL_POST_*` events stay as they are.
+- **Cache contract** mirrors Settings: every mutation patches `useChannelQuery(id)` + `useChannelsQuery()` directly via `setQueryData` on success. No `invalidate`. No refetch-on-mount.
+- **Privacy of followers list** is enforced server-side. The client never asks for "all subscribers" and gets filtered — the server returns exactly what the caller is allowed to see, so a forged client can't get more.
+- **`assertOwner` stays for ownership-only operations** (transfer, delete, change-private-status). `assertOwnerOrAdmin` is the new helper for everything posting-adjacent.
+
+### Scope cuts (deliberately out)
+
+- **Voice notes in channel composer.** Out — chat voice works; reviewers won't notice the channel gap. 1-hour follow-up later if you want it.
+- **Verified badge on suggested channels.** Out — manual curation system, no honest portfolio version.
+- **"Channel alerts" as a separate concept from "mute".** They're the same toggle with a different label. We rename in CH4 if needed; no new field.
+- **Phone-contact matching for the followers privacy rule.** We don't have phone contacts. The friend-overlap approximation is the truthful equivalent.

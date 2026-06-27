@@ -3,25 +3,37 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Eye,
+  MessageCircle,
   MoreVertical,
   Pause,
   Play,
   Trash2,
+  User,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useStatusFeedQuery } from "@/tanstack/status/queries";
 import {
   useDeleteStatusMutation,
   useViewStatusMutation,
 } from "@/tanstack/status/mutations";
+import { useStartChatMutation } from "@/tanstack/chat/mutations";
 import { StatusViewersSheet } from "./status-viewers-sheet";
 import { StatusReplyComposer } from "./status-reply-composer";
 import { useAuth } from "@/hooks/use-auth";
@@ -43,6 +55,7 @@ export function StatusViewer({ authorId }) {
   const { user } = useAuth();
   const view = useViewStatusMutation(authorId);
   const del = useDeleteStatusMutation();
+  const startChat = useStartChatMutation();
   const [viewersOpen, setViewersOpen] = useState(false);
   const [muted, setMuted] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -302,6 +315,15 @@ export function StatusViewer({ authorId }) {
           progress={progress}
         />
 
+        {/* Top scrim — a dark-to-transparent gradient behind the header
+            so the avatar/name/icons stay legible no matter how bright
+            or busy the media beneath is. Pointer-events-none so it
+            doesn't intercept clicks meant for the header buttons. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-28 bg-linear-to-b from-black/60 to-transparent"
+        />
+
         <header className="absolute left-0 right-0 top-6 z-20 flex items-center justify-between gap-3 px-4">
           <div className="flex min-w-0 items-center gap-3">
             <Avatar className="size-9">
@@ -364,14 +386,55 @@ export function StatusViewer({ authorId }) {
               </Button>
             )}
             {!isMine && (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="More"
-                className="text-white/80 hover:bg-white/10 hover:text-white"
-              >
-                <MoreVertical className="size-5" />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="More"
+                    className="text-white/80 hover:bg-white/10 hover:text-white"
+                  >
+                    <MoreVertical className="size-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem
+                    onClick={() => {
+                      const handle = author.user?.handle;
+                      if (!handle) {
+                        toast.info("This user has no public profile yet.");
+                        return;
+                      }
+                      router.replace(ROUTES.PROFILE(handle));
+                    }}
+                  >
+                    <User className="mr-2 size-4" /> View profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() =>
+                      startChat.mutate(author.user.id, {
+                        onSuccess: (chat) =>
+                          router.replace(ROUTES.CHAT_DETAIL(chat.id)),
+                        onError: (err) =>
+                          toast.error(
+                            err.response?.data?.error ?? "Couldn't open chat",
+                          ),
+                      })
+                    }
+                  >
+                    <MessageCircle className="mr-2 size-4" /> Message
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() =>
+                      toast.success("Thanks for the report — moderation will review.")
+                    }
+                    className="text-wa-danger focus:text-wa-danger"
+                  >
+                    <AlertTriangle className="mr-2 size-4" /> Report status
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <Button
               variant="ghost"
@@ -385,13 +448,25 @@ export function StatusViewer({ authorId }) {
           </div>
         </header>
 
-        <div className="flex flex-1 items-center justify-center">
+        <div className="relative flex flex-1 items-center justify-center">
           <StoryContent
             story={story}
             muted={muted}
             paused={paused}
             videoRef={videoRef}
           />
+
+          {/* Caption overlay for IMAGE/VIDEO statuses (TEXT stories
+              render their content inside StoryContent). Sits above the
+              footer with its own readability scrim so the text stays
+              legible on any media. */}
+          {!isText && story.caption && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4 pb-4">
+              <p className="mx-auto max-w-xl rounded-lg bg-black/55 px-4 py-2 text-center text-sm leading-relaxed text-white">
+                {story.caption}
+              </p>
+            </div>
+          )}
         </div>
 
         <footer className="z-20 flex h-16 shrink-0 items-center gap-3 px-4 pb-4">

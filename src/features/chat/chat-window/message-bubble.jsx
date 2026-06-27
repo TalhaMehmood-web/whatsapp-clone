@@ -2,6 +2,7 @@
 
 import { Forward, Star } from "lucide-react";
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/utils/cn";
 import { messageTime } from "@/utils/date-format";
 import { useAuth } from "@/hooks/use-auth";
@@ -25,9 +26,15 @@ import { StatusReplyHeader } from "./status-reply-bubble";
 // green tint and the read-receipt tick; incoming gets the panel background.
 // `showTail` controls whether to render the bubble's pointer tail (true for
 // the first message in a sender-grouped run).
-export function MessageBubble({ message, showTail = true, onEdit }) {
+export function MessageBubble({ message, showTail = true, isGroup = false, onEdit }) {
   const { user } = useAuth();
   const isOutgoing = message.senderId === user?.id;
+  // Avatar slot: only on incoming bubbles in group chats. The avatar
+  // shows on the FIRST message in a sender-grouped run; subsequent
+  // continuations render an invisible same-size spacer so the bubbles
+  // stay flush-aligned (matches WhatsApp).
+  const showAvatarSlot = isGroup && !isOutgoing;
+  const showAvatar = showAvatarSlot && showTail;
 
   // SYSTEM messages render their own centred card and skip the bubble +
   // context menu chrome entirely. Today the only flavour is "call".
@@ -101,10 +108,33 @@ export function MessageBubble({ message, showTail = true, onEdit }) {
       )}
       <div
         className={cn(
-          "flex w-full flex-col px-3",
-          isOutgoing ? "items-end justify-end" : "items-start justify-start",
+          "flex w-full px-3",
+          isOutgoing ? "justify-end" : "justify-start",
         )}
       >
+      {showAvatarSlot && (
+        // Reserve the avatar's width even on continuation rows so the
+        // bubble column stays flush-aligned across a sender's run.
+        <div className="mr-2 mt-1 shrink-0 self-end">
+          {showAvatar ? (
+            <Avatar className="size-8">
+              <AvatarImage
+                src={message.sender?.avatar ?? undefined}
+                alt={message.sender?.name ?? ""}
+              />
+              <AvatarFallback className="bg-wa-panel-3 text-[10px]">
+                {(message.sender?.name ?? "??").slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+          ) : (
+            <div className="size-8" aria-hidden="true" />
+          )}
+        </div>
+      )}
+      <div className={cn(
+        "flex max-w-[65%] flex-col",
+        isOutgoing ? "items-end" : "items-start",
+      )}>
       <MessageContextMenu
         message={message}
         isOutgoing={isOutgoing}
@@ -112,7 +142,7 @@ export function MessageBubble({ message, showTail = true, onEdit }) {
       >
         <div
           className={cn(
-            "relative max-w-[65%] rounded-lg text-sm shadow-sm",
+            "relative rounded-lg text-sm shadow-sm",
             isOutgoing
               ? "bg-wa-green-2 text-wa-text"
               : "bg-wa-panel-3 text-wa-text",
@@ -180,6 +210,7 @@ export function MessageBubble({ message, showTail = true, onEdit }) {
         message={message}
         align={isOutgoing ? "end" : "start"}
       />
+      </div>
       </div>
     </div>
   );

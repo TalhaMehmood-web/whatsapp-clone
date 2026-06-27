@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useMessagesQuery } from "@/tanstack/messages/queries";
+import { useChatQuery } from "@/tanstack/chat/queries";
 import { useUiStore } from "@/stores/ui-store";
 import { daySeparator } from "@/utils/date-format";
 import { DaySeparator, MessageBubble } from "./message-bubble";
@@ -21,10 +22,27 @@ export function MessageList({ chatId }) {
     fetchNextPage,
     hasNextPage,
   } = useMessagesQuery(chatId);
+  // Group vs 1:1 decides whether to show per-message sender avatars on
+  // incoming bubbles. WhatsApp only shows them in groups — 1:1 has the
+  // peer's avatar in the chat header already.
+  const { data: chatData } = useChatQuery(chatId);
+  const isGroup = !!chatData?.chat?.isGroup;
   const scrollerRef = useRef(null);
   const lastIdRef = useRef(null);
+  // Tracks whether the initial landing-at-bottom has finished. We reset
+  // it whenever the chat id changes so each new chat open re-runs the
+  // settle loop (catches the dynamic-measurement case where bubbles
+  // expand from their 56px estimate to their real height).
+  const initialSettledRef = useRef(false);
   const setEditing = useUiStore((s) => s.setEditing);
   const onEdit = (message) => setEditing(chatId, message);
+
+  // Reset bottom-tracking state on every chat switch so the next chat
+  // doesn't inherit "we already landed" from the previous one.
+  useEffect(() => {
+    lastIdRef.current = null;
+    initialSettledRef.current = false;
+  }, [chatId]);
 
   // Flatten pages oldest→newest.
   const messages = useMemo(() => {
@@ -43,13 +61,51 @@ export function MessageList({ chatId }) {
     getItemKey: (i) => rows[i].id,
   });
 
-  // Auto-scroll to bottom whenever the newest message changes.
+  // Auto-scroll to bottom. Two phases:
+  //
+  //  1. Initial open (`initialSettledRef.current === false`): the
+  //     virtualizer's estimated row heights (56px) don't match the real
+  //     measured heights (multiline text, media bubbles, etc.). A single
+  //     scrollToIndex lands at an estimated position that scrolls back
+  //     UP as rows measure their true height. WhatsApp's "always lands
+  //     at the latest message" feel comes from pinning to the actual
+  //     scrollHeight after each measurement pass. We re-pin via
+  //     rAF for up to ~1 second, then stop.
+  //
+  //  2. Steady state (initial settled): only scroll when the newest
+  //     message changes (new arrival or my own send). The existing
+  //     lastIdRef guard handles that.
   useEffect(() => {
     const last = messages[messages.length - 1];
     if (!last) return;
-    if (lastIdRef.current === last.id) return;
+    const isNewMessage = lastIdRef.current !== last.id;
+    if (!isNewMessage && initialSettledRef.current) return;
     lastIdRef.current = last.id;
+
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    if (!initialSettledRef.current) {
+      // Phase 1: pin to the real bottom across measurement passes.
+      const start = Date.now();
+      let raf = 0;
+      const pin = () => {
+        if (!scrollerRef.current) return;
+        scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
+        if (Date.now() - start < 1000) {
+          raf = requestAnimationFrame(pin);
+        } else {
+          initialSettledRef.current = true;
+        }
+      };
+      raf = requestAnimationFrame(pin);
+      return () => cancelAnimationFrame(raf);
+    }
+
+    // Phase 2: a single scrollToIndex is fine — rows have measured
+    // their real heights by now, the estimate-vs-real mismatch is gone.
     virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+    return undefined;
   }, [messages, rows.length, virtualizer]);
 
   // Load older messages when the scroller is near the top.
@@ -108,6 +164,7 @@ export function MessageList({ chatId }) {
                 <MessageBubble
                   message={row.message}
                   showTail={row.showTail}
+                  isGroup={isGroup}
                   onEdit={onEdit}
                 />
               )}

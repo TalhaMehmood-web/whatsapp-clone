@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown, Shield, ShieldOff, UserMinus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import {
+  ChevronDown,
+  MessageCircle,
+  Shield,
+  ShieldOff,
+  User,
+  UserMinus,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -8,14 +16,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   useRemoveMemberMutation,
   useUpdateMemberRoleMutation,
 } from "@/tanstack/groups/mutations";
+import { useStartChatMutation } from "@/tanstack/chat/mutations";
 import { MemberRole } from "@/models/enums";
-import { COPY } from "@/config/constants";
+import { COPY, ROUTES } from "@/config/constants";
 import { cn } from "@/utils/cn";
 
 // One row in the group-info member list, matching the WhatsApp Web look:
@@ -25,12 +35,31 @@ import { cn } from "@/utils/cn";
 // group (a small chevron appears on hover). For the current user we just
 // show "You" instead of their name and keep the row inert.
 export function GroupInfoMemberRow({ chatId, member, canManage, isSelf }) {
+  const router = useRouter();
   const remove = useRemoveMemberMutation(chatId);
   const updateRole = useUpdateMemberRoleMutation(chatId);
+  const startChat = useStartChatMutation();
 
   const isAdmin = member.role !== MemberRole.MEMBER;
   const isOwner = member.role === MemberRole.OWNER;
-  const canRowOpenMenu = canManage && !isSelf && !isOwner;
+  // GR3: every non-self row gets a dropdown — Message + View are
+  // available to all members; the admin-only Make/Revoke admin +
+  // Remove rows appear below for managers (and never for the owner).
+  const canManageThisRow = canManage && !isOwner;
+  const canRowOpenMenu = !isSelf;
+
+  const onMessage = () =>
+    startChat.mutate(member.userId, {
+      onSuccess: (chat) => router.push(ROUTES.CHAT_DETAIL(chat.id)),
+      onError: (err) =>
+        toast.error(err.response?.data?.error ?? "Couldn't open chat"),
+    });
+
+  const onViewProfile = () => {
+    const handle = member.user?.handle;
+    if (handle) router.push(ROUTES.PROFILE(handle));
+    else toast.info("This member doesn't have a public profile yet.");
+  };
 
   const u = member.user ?? {};
   const displayName = isSelf ? "You" : u.name ?? "Unknown";
@@ -91,6 +120,8 @@ export function GroupInfoMemberRow({ chatId, member, canManage, isSelf }) {
 
   if (!canRowOpenMenu) return row;
 
+  const displayLabel = member.user?.name ?? "this member";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -98,50 +129,65 @@ export function GroupInfoMemberRow({ chatId, member, canManage, isSelf }) {
           {row}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        {isAdmin ? (
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onClick={onMessage}>
+          <MessageCircle className="mr-2 size-4" />
+          Message {displayLabel}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onViewProfile}>
+          <User className="mr-2 size-4" />
+          View profile
+        </DropdownMenuItem>
+
+        {canManageThisRow && <DropdownMenuSeparator />}
+
+        {canManageThisRow && (
+          isAdmin ? (
+            <DropdownMenuItem
+              onClick={() =>
+                updateRole.mutate(
+                  { userId: member.userId, role: MemberRole.MEMBER },
+                  {
+                    onError: (err) =>
+                      toast.error(err.response?.data?.error ?? "Failed"),
+                  },
+                )
+              }
+            >
+              <ShieldOff className="mr-2 size-4" />
+              {COPY.GROUP_INFO_REVOKE_ADMIN}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() =>
+                updateRole.mutate(
+                  { userId: member.userId, role: MemberRole.ADMIN },
+                  {
+                    onError: (err) =>
+                      toast.error(err.response?.data?.error ?? "Failed"),
+                  },
+                )
+              }
+            >
+              <Shield className="mr-2 size-4" />
+              {COPY.GROUP_INFO_MAKE_ADMIN}
+            </DropdownMenuItem>
+          )
+        )}
+        {canManageThisRow && (
           <DropdownMenuItem
+            className="text-wa-danger focus:text-wa-danger"
             onClick={() =>
-              updateRole.mutate(
-                { userId: member.userId, role: MemberRole.MEMBER },
-                {
-                  onError: (err) =>
-                    toast.error(err.response?.data?.error ?? "Failed"),
-                },
-              )
+              remove.mutate(member.userId, {
+                onError: (err) =>
+                  toast.error(err.response?.data?.error ?? "Failed"),
+              })
             }
           >
-            <ShieldOff className="mr-2 size-4" />
-            {COPY.GROUP_INFO_REVOKE_ADMIN}
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem
-            onClick={() =>
-              updateRole.mutate(
-                { userId: member.userId, role: MemberRole.ADMIN },
-                {
-                  onError: (err) =>
-                    toast.error(err.response?.data?.error ?? "Failed"),
-                },
-              )
-            }
-          >
-            <Shield className="mr-2 size-4" />
-            {COPY.GROUP_INFO_MAKE_ADMIN}
+            <UserMinus className="mr-2 size-4" />
+            {COPY.GROUP_INFO_REMOVE}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          className="text-wa-danger focus:text-wa-danger"
-          onClick={() =>
-            remove.mutate(member.userId, {
-              onError: (err) =>
-                toast.error(err.response?.data?.error ?? "Failed"),
-            })
-          }
-        >
-          <UserMinus className="mr-2 size-4" />
-          {COPY.GROUP_INFO_REMOVE}
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

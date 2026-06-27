@@ -52,7 +52,6 @@ import {
 } from "@/tanstack/chat/mutations";
 import { useAuth } from "@/hooks/use-auth";
 import { COPY, ROUTES } from "@/config/constants";
-import { ChatMediaBrowser } from "@/features/chat/chat-media-browser/chat-media-browser";
 import { ChatMediaPreviewStrip } from "@/features/chat/chat-media-browser/chat-media-preview-strip";
 import { LockChatDialog } from "@/features/chat/locked-chats/lock-chat-dialog";
 import { DisappearingMessagesDialog } from "@/features/chat/chat-window/disappearing-messages-dialog";
@@ -78,10 +77,17 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
   const clearChat = useClearChatMutation();
   const deleteChat = useDeleteChatMutation();
 
-  const [mediaOpen, setMediaOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [disappearingOpen, setDisappearingOpen] = useState(false);
   const [confirm, setConfirm] = useState(null); // "clear" | "delete" | null
+
+  // Closes this sheet first, then pushes to the full-screen media
+  // library route. Sheet-then-navigate avoids the zombie-overlay state
+  // that used to leave the info sheet open underneath a route change.
+  const openMediaLibrary = () => {
+    onOpenChange(false);
+    router.push(ROUTES.CHAT_MEDIA(chatId));
+  };
 
   if (!chat) return null;
 
@@ -129,11 +135,18 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
       },
     });
 
+  // Nested overlays (media browser, lock dialog, disappearing-messages
+  // dialog, confirm AlertDialog) are rendered as *siblings* of the outer
+  // <Sheet>, not children. If they're children, Radix treats their close
+  // events as part of the outer Sheet's dismiss tree — clicking the
+  // inner overlay also closes the outer one. Sibling placement keeps the
+  // two layer stacks independent.
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex h-full w-md flex-col gap-0 overflow-hidden border-wa-border bg-wa-panel p-0 text-wa-text"
+        className="flex h-full w-full flex-col gap-0 overflow-hidden border-wa-border bg-wa-panel p-0 text-wa-text sm:max-w-md"
       >
         <SheetHeader className="flex-row items-center gap-3 space-y-0 border-b border-wa-border px-3 py-3 text-left">
           <Button
@@ -181,10 +194,12 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
             </div>
           </div>
 
-          {/* Media, links & docs */}
+          {/* Media, links & docs — navigates to the full-screen library
+              route. The sheet closes first so a Back tap from the route
+              lands the user back on the chat (not a zombie info sheet). */}
           <button
             type="button"
-            onClick={() => setMediaOpen(true)}
+            onClick={openMediaLibrary}
             className="flex w-full items-center justify-between gap-3 border-y border-wa-border bg-wa-panel-2/40 px-4 py-3 text-left transition-colors hover:bg-wa-panel-2"
           >
             <div className="flex items-center gap-3">
@@ -201,7 +216,7 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
           <ChatMediaPreviewStrip
             media={mediaSample}
             docs={docsSample}
-            onOpen={() => setMediaOpen(true)}
+            onOpen={openMediaLibrary}
           />
 
           <Separator />
@@ -268,12 +283,8 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
           />
         </ScrollArea>
       </SheetContent>
+    </Sheet>
 
-      <ChatMediaBrowser
-        chatId={chatId}
-        open={mediaOpen}
-        onOpenChange={setMediaOpen}
-      />
       <LockChatDialog
         chatId={chatId}
         open={lockOpen}
@@ -316,7 +327,7 @@ export function ContactInfoSheet({ chatId, open, onOpenChange }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Sheet>
+    </>
   );
 }
 
